@@ -8,9 +8,8 @@ Mind owns task state; source threads own conversation state. Ears never posts,
 labels, opens issues, executes transcript instructions or makes scientific
 judgements. The existing Discussions hub is unchanged.
 
-This is the standalone bootstrap. Brain's original collector remains in place
-until a separately reviewed adapter/identity change lands. The new board is
-not registered in the cockpit yet. Follow-through and theme synthesis are
+Brain's Community adapter reads the Ears snapshot; the cockpit reads its
+published `state.json` feed, registered after Eyes in the canonical organ order. Follow-through and theme synthesis are
 explicitly pending programme phases, not implemented features.
 
 ## Community snapshot v1
@@ -68,8 +67,8 @@ job fails; `valid_until` and the page's stale banner prevent a fresh claim.
 constructor/validator; `badge.json` uses the endpoint badge format. The
 snapshot is published alongside them for inspection. Brain is read as a
 sibling checkout for shared CSS/components and state construction, never
-copied wholesale or modified by the Ears renderer. An additive local Ears
-palette supplies its identity pending shared-theme integration.
+copied wholesale or modified by the Ears renderer. Brain supplies the shared Ears palette and mark; a local fallback supports
+older Brain checkouts until their shared theme includes Ears.
 
 Green means no attention items/unknowns/source gaps in fresh observed data.
 Yellow means attention or incomplete evidence; grey means no readable public

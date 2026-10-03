@@ -47,10 +47,24 @@ Response timing uses the earliest external message after the last maintainer
 message, including PR review comments and submitted reviews. A reply is not
 proof of resolution. Missing timestamps/order mean unknown. Accepted answers
 and broadcast categories preserve the existing hub settlement semantics.
-The REST discussion adapter does not independently verify nested replies:
-discussion activity is marked partial and response state unknown unless the
-accepted-answer/broadcast policy already settles it. A later adapter can
-upgrade coverage; do not silently claim full coverage now.
+Discussion activity uses fixed read-only GraphQL queries for the complete
+top-level comment connection and each comment's reply connection. Every
+connection follows `pageInfo` cursors independently up to `max_pages`; a
+missing/repeated cursor, null node, malformed response, GraphQL error or page
+limit makes coverage partial. A failed GraphQL read may retain REST comments,
+but those cannot prove reply completeness or clear the gap. No comment bodies
+are requested by these queries. See GitHub's
+[Discussion and DiscussionComment contracts](https://docs.github.com/en/graphql/guides/using-the-graphql-api-for-discussions).
+
+Deleted/unavailable actors, deleted comments, missing timestamps and ambiguous
+cross-author ordering make response state unknown. A source that failed to
+read is distinct from a successful empty read. REST PR review comments include
+inline replies; submitted reviews and issue comments are separately paginated.
+This measures response activity, not review-thread resolution or delivery.
+An accepted proposal settles the hub response obligation only; implementation
+and release evidence belong to the later follow-through phase. Accepted-answer
+and broadcast policy can settle response obligation even while a coverage gap
+remains visible.
 
 The CLI returns 2 for invalid configuration, input or render failure. Source
 read failures appear in a valid degraded snapshot so the dashboard can expose
@@ -82,6 +96,9 @@ Clipboard failure exposes selectable prompt text; external text is escaped.
 Python 3.12+ and PyYAML; `gh` for live reads. GitHub Actions supplies its
 read-only token. Local operators use their existing GitHub authentication;
 never add credentials to config. No model/API calls or billing path.
+GraphQL unavailability on a particular token or proxy is reported as partial
+coverage; it never triggers credential changes or a write request. GraphQL
+queries use HTTP POST as required by that read API, but contain no mutations.
 
 ```bash
 python bin/pyauto-ears scan --mind ../PyAutoMind --output output/snapshot.json

@@ -9,6 +9,22 @@ from pathlib import Path
 
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 BROADCAST = {"Announcements", "Show and tell"}
+DISCUSSION_COMMENTS = """query($owner:String!, $name:String!, $number:Int!, $after:String) {
+  repository(owner:$owner, name:$name) { discussion(number:$number) {
+    comments(first:100, after:$after) {
+      nodes { id createdAt deletedAt author { login __typename } }
+      pageInfo { hasNextPage endCursor }
+    }
+  } }
+}"""
+DISCUSSION_REPLIES = """query($id:ID!, $after:String) {
+  node(id:$id) { ... on DiscussionComment {
+    replies(first:100, after:$after) {
+      nodes { id createdAt deletedAt author { login __typename } }
+      pageInfo { hasNextPage endCursor }
+    }
+  } }
+}"""
 
 
 def utc(value):
@@ -71,6 +87,86 @@ class GitHub:
         except ValueError:
             raise ReadError("invalid JSON response") from None
 
+    def discussion_page(self, repo, number, after=None, comment_id=None):
+        """Only these fixed queries are allowed; source text is never executable."""
+        owner, name = repository(repo).split("/")
+        query = DISCUSSION_REPLIES if comment_id else DISCUSSION_COMMENTS
+        variables = {"id": comment_id} if comment_id else {
+            "owner": owner, "name": name, "number": number}
+        if after is not None:
+            variables["after"] = after
+        payload = json.dumps({"query": query, "variables": variables})
+        try:
+            r = subprocess.run([self.binary, "api", "graphql", "--input", "-"],
+                               input=payload, capture_output=True, text=True, timeout=60)
+            if r.returncode:
+                raise ReadError("Discussion GraphQL read failed (permissions, rate limit or endpoint)")
+            result = json.loads(r.stdout)
+            if not isinstance(result, dict) or result.get("errors"):
+                raise ReadError("Discussion GraphQL returned incomplete evidence")
+            data = result["data"]
+            return data["node"]["replies"] if comment_id else data["repository"]["discussion"]["comments"]
+        except (OSError, subprocess.TimeoutExpired):
+            raise ReadError("Discussion GraphQL client unavailable or timed out") from None
+        except (ValueError, KeyError, TypeError):
+            raise ReadError("invalid Discussion GraphQL response") from None
+
+
+def discussion_connection(api, repo, number, cap, comment_id=None):
+    rows, seen, cursor = [], set(), None
+    if not hasattr(api, "discussion_page"):
+        return rows, False, "Discussion GraphQL adapter unavailable"
+    for _ in range(cap):
+        try:
+            data = api.discussion_page(repo, number, cursor, comment_id)
+        except ReadError as exc:
+            return rows, False, str(exc)
+        if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
+            return rows, False, "invalid Discussion connection"
+        # Null nodes may represent deleted/inaccessible activity. Keep the gap.
+        if any(not isinstance(x, dict) for x in data["nodes"]):
+            rows.extend(x for x in data["nodes"] if isinstance(x, dict))
+            return rows, False, "Discussion activity contains an unavailable node"
+        rows.extend(data["nodes"])
+        info = data.get("pageInfo")
+        if not isinstance(info, dict) or type(info.get("hasNextPage")) is not bool:
+            return rows, False, "invalid Discussion pagination metadata"
+        if not info["hasNextPage"]:
+            return rows, True, None
+        cursor = info.get("endCursor")
+        if not isinstance(cursor, str) or not cursor or cursor in seen:
+            return rows, False, "Discussion pagination cursor missing or repeated"
+        seen.add(cursor)
+    return rows, False, "Discussion page budget reached; additional entries may exist"
+
+
+def discussion_activity(api, repo, number, cap):
+    comments, complete, reason = discussion_connection(api, repo, number, cap)
+    gaps = [reason] if reason else []
+    activity = list(comments)
+    for comment in comments:
+        identity = comment.get("id")
+        if not isinstance(identity, str) or not identity:
+            complete = False
+            gaps.append("Discussion comment identity unavailable")
+            continue
+        replies, ok, why = discussion_connection(api, repo, number, cap, identity)
+        activity.extend(replies)
+        complete &= ok
+        if why:
+            gaps.append(why)
+    normalized = [{"created_at": x.get("createdAt"), "deleted_at": x.get("deletedAt"),
+                   "user": {"login": x["author"].get("login"),
+                            "type": x["author"].get("__typename")}
+                   if isinstance(x.get("author"), dict) else None} for x in activity]
+    if not complete:
+        # REST can preserve observed activity, but cannot erase the GraphQL gap.
+        fallback, _, why = pages(api, f"repos/{repo}/discussions/{number}/comments", cap)
+        normalized.extend(fallback)
+        if why:
+            gaps.append(why)
+    return normalized, complete, list(dict.fromkeys(gaps))
+
 
 def pages(api, endpoint, cap):
     items = []
@@ -89,8 +185,21 @@ def pages(api, endpoint, cap):
 
 
 def human(user):
-    return bool(user and user.get("login")) and user.get("type") != "Bot" \
+    return isinstance(user, dict) and isinstance(user.get("login"), str) and bool(user["login"]) and user.get("type") != "Bot" \
         and not user["login"].endswith("[bot]")
+
+
+def activity_events(entries):
+    events, gaps = [], []
+    for entry in entries:
+        actor = entry.get("user")
+        if entry.get("state") == "PENDING":
+            continue
+        if entry.get("deleted_at") or not isinstance(actor, dict) or not isinstance(actor.get("login"), str) or not actor["login"]:
+            gaps.append("activity author deleted or unavailable")
+        elif human(actor):
+            events.append((entry.get("submitted_at") or entry.get("created_at"), actor["login"]))
+    return events, list(dict.fromkeys(gaps))
 
 
 def waiting(events, selves):
@@ -123,16 +232,14 @@ def conversation(api, repo, raw, kind, config):
         raise ReadError("invalid conversation number")
     path = "discussions" if kind == "discussion" else "issues"
     prefix = f"repos/{repo}/{path}/{number}"
-    comments, complete, reason = pages(api, prefix + "/comments", config["max_pages"])
-    gaps = [reason] if reason else []
     if kind == "discussion":
-        # The available REST contract does not prove recursive reply coverage.
-        # Keep the source visibly partial until an adapter can establish it.
-        complete = False
-        gaps.append("nested discussion replies not independently verified")
-    events = [(raw.get("created_at"), raw["user"]["login"])] if human(raw.get("user")) else []
-    events += [(x.get("created_at"), x["user"]["login"]) for x in comments
-               if human(x.get("user"))]
+        comments, complete, gaps = discussion_activity(api, repo, number, config["max_pages"])
+    else:
+        comments, complete, reason = pages(api, prefix + "/comments", config["max_pages"])
+        gaps = [reason] if reason else []
+    events, missing = activity_events([raw] + comments)
+    gaps.extend(missing)
+    complete &= not missing
     reviewers = []
     if kind == "pr":
         for endpoint in ("comments", "reviews"):
@@ -140,9 +247,10 @@ def conversation(api, repo, raw, kind, config):
             complete &= ok
             if why:
                 gaps.append(why)
-            events += [(x.get("submitted_at") or x.get("created_at"), x["user"]["login"])
-                       for x in entries if human(x.get("user"))
-                       and x.get("state") != "PENDING"]
+            review_events, missing = activity_events(entries)
+            events.extend(review_events)
+            gaps.extend(missing)
+            complete &= not missing
         try:
             detail = api.get(f"repos/{repo}/pulls/{number}")
             reviewers = [x["login"].casefold() for x in detail.get("requested_reviewers", [])]
@@ -151,6 +259,9 @@ def conversation(api, repo, raw, kind, config):
             gaps.append("requested reviewers unavailable")
     selves = {x.casefold() for x in config["self_logins"]}
     awaiting, since = waiting(events, selves) if complete else (None, None)
+    if complete and awaiting is None:
+        complete = False
+        gaps.append("activity timestamps unavailable or ordering ambiguous")
     category = (raw.get("category") or {}).get("name")
     answered = raw.get("answer_chosen_at") is not None
     # Preserve the established hub policy; delivery follow-up is separate.
@@ -202,12 +313,15 @@ def collect(api, repo_homes, config):
             for entry in entries:
                 if entry.get("state", "open") != "open" or entry.get("locked"):
                     continue
-                item_kind = "pr" if entry.get("pull_request") else kind
+                item_kind = "pr" if "pull_request" in entry else kind
                 is_human = human(entry.get("user"))
-                if not is_human and item_kind != "pr":
+                known_bot = isinstance(entry.get("user"), dict) and (
+                    entry["user"].get("type") == "Bot" or
+                    str(entry["user"].get("login", "")).endswith("[bot]"))
+                if known_bot and item_kind != "pr":
                     continue
                 external = is_human and entry["user"]["login"].casefold() not in selves
-                if item_kind == "issue" and not external:
+                if item_kind == "issue" and is_human and not external:
                     continue
                 try:
                     row = conversation(api, repo, entry, item_kind, config)

@@ -7,12 +7,17 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 from test_ears import BRAIN, CONFIG, STAMP, board, fixture
+from test_followthrough import delivery_snapshot
 
 
 def main():
     output = Path("_site/browser-fixture").resolve()
     output.mkdir(parents=True, exist_ok=True)
-    for name, value in board.render(fixture(), CONFIG, BRAIN, rendered_at=STAMP).items():
+    snapshot = fixture()
+    linked = delivery_snapshot()
+    snapshot["conversations"].extend(linked["conversations"])
+    snapshot["follow_through"] = linked["follow_through"]
+    for name, value in board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP).items():
         (output / name).write_text(value)
     server = http.server.ThreadingHTTPServer(
         ("127.0.0.1", 0), functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(output)))
@@ -37,6 +42,10 @@ def main():
             page.wait_for_function("document.getElementById('copy-status').textContent === 'Prompt copied'")
             copied = page.evaluate("navigator.clipboard.readText()")
             assert "community" in copied and "https://github.com/example/lib/issues/1" in copied
+            follow = page.get_by_role("button", name="Copy follow-through prompt").first
+            follow.click()
+            page.wait_for_function("navigator.clipboard.readText().then(t => t.includes('do not post'))")
+            assert "example/hub/discussions/1" in page.evaluate("navigator.clipboard.readText()")
             page.evaluate("Object.defineProperty(navigator, 'clipboard', {value: {writeText: async () => {throw Error('denied')}}})")
             button.click()
             page.wait_for_function("document.getElementById('copy-status').textContent.startsWith('Copy unavailable')")

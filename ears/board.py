@@ -43,10 +43,13 @@ def render(snapshot, config, brain, rendered_at=None):
     unknown = [r for r in rows if r["awaiting_response"] is None or r["coverage"] != "complete"]
     attention = [r for r in rows if r["awaiting_response"] or r["review_requested"]]
     attention.sort(key=lambda r: r.get("waiting_since") or snapshot["generated"])
-    status = "stale" if stale else "yellow" if incomplete or unknown or attention else "green"
+    delivery = snapshot.get("follow_through", [])
+    owed = [r for r in delivery if r["update_owed"] is True]
+    delivery_unknown = [r for r in delivery if r["state"] == "unknown"]
+    status = "stale" if stale else "yellow" if incomplete or unknown or attention or owed or delivery_unknown else "green"
     if not receipts or all(r["status"] in {"unavailable", "excluded"} for r in receipts):
         status = "grey"
-    headline = f"{len(attention)} need attention · {len(unknown)} unknown · {len(incomplete)} source gaps"
+    headline = f"{len(attention)} need attention · {len(unknown)} unknown · {len(incomplete)} source gaps · {len(owed)} updates owed · {len(delivery_unknown)} delivery unknown"
     if stale:
         headline = "STALE — " + headline
     items = []
@@ -57,6 +60,11 @@ def render(snapshot, config, brain, rendered_at=None):
                       "state": "unknown" if row in unknown else "action_required",
                       "actions": [{"id": "triage", "kind": "prompt", "label": "Triage",
                                    "target": prompt, "safety": "read_only"}]})
+    for row in ([] if stale else owed):
+        prompt = theme.portable_prompt(f"/community triage {row['discussion']} — verify delivery evidence and draft a contributor update for approval; do not post")
+        items.append({"id": "delivery:" + row["discussion"], "severity": "yellow",
+                      "text": "Contributor update owed", "url": row["discussion"], "prompt": prompt,
+                      "state": "action_required"})
     if incomplete or not receipts:
         items.append({"id": "coverage", "severity": "yellow", "text": "Listening coverage is incomplete",
                       "state": "unknown", "url": config["pages_url"] + "#coverage"})
@@ -105,8 +113,28 @@ def render(snapshot, config, brain, rendered_at=None):
         body.append("<li>" + esc(text) + "</li>")
         md.append("- " + esc(text))
     body.append('</ul><p>Discussion comments and replies are read separately. Failed reads and pagination limits remain explicit coverage gaps; accepted answers do not establish delivery.</p></section>')
-    for title, message in [("Following through", "Planned: linked development and release evidence. Delivery tracking is not active yet."),
-                           ("Recurring feedback", "Planned: evidence-backed themes across independent reports. No themes have been inferred by this collector.")]:
+    body.append('<section><h2>Following through</h2><p>Explicit maintainer links only. Missing links mean unknown; settled conversations stay settled.</p>')
+    md.extend(["", "## Following through", ""])
+    if not delivery:
+        body.append('<p>No delivery evidence in this snapshot.</p>')
+        md.append('No delivery evidence in this snapshot.')
+    for row in delivery:
+        label = 'unknown (stale observation)' if stale else row['state'].replace('_', ' ')
+        if row['update_owed'] is True and not stale:
+            label += ' — contributor update owed'
+        body.append('<article><h3><a href="' + esc(row['discussion'], quote=True) + '">Discussion</a>: ' + esc(label) + '</h3><ul>')
+        md.append('- ' + row['discussion'] + ': ' + label)
+        for evidence in row['evidence']:
+            body.append('<li><a href="' + esc(evidence['url'], quote=True) + '">' + esc(evidence['kind'] + ': ' + evidence['url']) + '</a></li>')
+            md.append('  - ' + evidence['url'])
+        body.append('</ul>')
+        for gap in row['gaps']:
+            body.append('<p>' + esc(gap) + '</p>')
+        prompt = theme.portable_prompt('/community triage ' + row['discussion'] + ' — verify linked delivery evidence and draft a contributor update for approval; do not post')
+        body.append('<button type="button" data-copy="' + esc(prompt, quote=True) + '">Copy follow-through prompt</button><details><summary>Prompt</summary><pre>' + esc(prompt) + '</pre></details></article>')
+        md.extend(['', '```text', prompt, '```', ''])
+    body.append('</section>')
+    for title, message in [("Recurring feedback", "Planned: evidence-backed themes across independent reports. No themes have been inferred by this collector.")]:
         body.append(f"<section><h2>{title}</h2><p>{message}</p></section>")
         md.extend(["", "## " + title, "", message, ""])
     body.append('<p id="copy-status" role="status" aria-live="polite"></p>')

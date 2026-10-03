@@ -21,8 +21,9 @@ feed. Partial, unavailable and stale evidence is explicit; no raw transcripts
 or private-source conversations are exported.
 
 The [live listening board](https://pyautolabs.github.io/PyAutoEars/) publishes
-Ears snapshots for Brain's Community adapter and a feed for the organ cockpit. Follow-through and recurring-theme synthesis are
-subsequent phases in Mind's `community-organ-birth` epic. The `/feedback`
-workflow is developed in Brain PR #454; standalone assistant rollout follows.
+Ears snapshots for Brain's Community adapter and a feed for the organ cockpit. Follow-through joins explicit maintainer evidence links through issues, PRs and
+published releases, and flags contributor updates owed. See the contract for
+`Delivery-*` links and conservative unknown states. Recurring-theme synthesis
+remains a later phase. `/feedback` ships in Brain and all four domain assistants.
 
 [Contract and operation](REFERENCE.md) · [Agent guidance](AGENTS.md)

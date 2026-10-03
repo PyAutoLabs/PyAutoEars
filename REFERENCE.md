@@ -9,8 +9,7 @@ labels, opens issues, executes transcript instructions or makes scientific
 judgements. The existing Discussions hub is unchanged.
 
 Brain's Community adapter reads the Ears snapshot; the cockpit reads its
-published `state.json` feed, registered after Eyes in the canonical organ order. Follow-through and theme synthesis are
-explicitly pending programme phases, not implemented features.
+published `state.json` feed, registered after Eyes in the canonical organ order. Follow-through is an evidence projection; recurring-theme synthesis remains pending.
 
 ## Community snapshot v1
 
@@ -52,8 +51,7 @@ top-level comment connection and each comment's reply connection. Every
 connection follows `pageInfo` cursors independently up to `max_pages`; a
 missing/repeated cursor, null node, malformed response, GraphQL error or page
 limit makes coverage partial. A failed GraphQL read may retain REST comments,
-but those cannot prove reply completeness or clear the gap. No comment bodies
-are requested by these queries. See GitHub's
+but those cannot prove reply completeness or clear the gap. Comment bodies are read transiently to extract explicit maintainer delivery links, then discarded; no bodies are exported. See GitHub's
 [Discussion and DiscussionComment contracts](https://docs.github.com/en/graphql/guides/using-the-graphql-api-for-discussions).
 
 Deleted/unavailable actors, deleted comments, missing timestamps and ambiguous
@@ -62,7 +60,7 @@ read is distinct from a successful empty read. REST PR review comments include
 inline replies; submitted reviews and issue comments are separately paginated.
 This measures response activity, not review-thread resolution or delivery.
 An accepted proposal settles the hub response obligation only; implementation
-and release evidence belong to the later follow-through phase. Accepted-answer
+and release evidence belong to the separate follow-through projection. Accepted-answer
 and broadcast policy can settle response obligation even while a coverage gap
 remains visible.
 
@@ -112,3 +110,63 @@ Pages builds on main, manual dispatch and every two hours. Set repository
 Pages source to GitHub Actions before first deployment. PR CI never deploys.
 Deployment failure is not fixed by publishing fabricated data. No scheduled
 agent session is created. The workflow is ordinary repository automation.
+
+
+## Follow-through projection (optional snapshot v1 extension)
+
+`follow_through` contains one record per observed Discussion: canonical
+`discussion` URL, derived `state`, nullable boolean `update_owed`, `evidence`
+(publicly verified URL/repo/kind triples) and bounded `gaps`. No source bodies
+or manual task assignments are stored. Old snapshots without the extension
+remain valid. Conversations may carry boolean `closed`; closed Discussions
+are collected separately, remain settled, and do not count as open in Brain.
+
+A configured maintainer records explicit links on their own source body or
+comment/reply, one unquoted standalone line per link:
+
+```text
+Delivery-issue: https://github.com/owner/repo/issues/123
+```
+
+On that target issue, maintainers name **all required PRs**, and published
+release tags once available:
+
+```text
+Delivery-PR: https://github.com/owner/repo/pull/124
+Delivery-release: https://github.com/owner/repo/releases/tag/v1.2.3
+```
+
+These lines declare relationships, not status. Ordinary mentions and labels
+are ambiguous and do not prove delivery. `Delivery-revert: <PR URL>` blocks
+availability until a maintainer reassesses the source links. After actually
+sending a contributor update on the original Discussion, its maintainer-authored
+comment can record `Delivery-update: <release URL>` for every delivered release.
+The comment must postdate publication. Merely mentioning a release is not proof
+that the contributor was updated. Do not add these lines to other people's
+comments or post them automatically.
+
+Ears verifies public repositories before reading linked records. Open linked
+issues without PRs are accepted; open required PRs are in development; all
+merged PRs without a declared release or with a Mind pending-release key are
+merged-unreleased. Closed not-planned issues are declined. Availability needs
+all required PRs merged, target issues closed as completed, stable published
+releases containing every merge commit, complete bounded commit evidence with
+no revert mention, and no Mind pending-release obligation. Unknown/private
+sources, missing links, abandoned PRs, reopened issues, explicit revert links,
+truncated ancestry and mixed decline/delivery remain unknown. This does not
+prove scientific correctness or installation in a user's environment. A revert
+after the declared release requires a source revert link or reopened issue;
+Ears does not audit all later branch history or infer semantic equivalence.
+
+`max_pages` still bounds comment connections; each link set is limited to 100.
+Only linked release tags are read: Ears never searches for a convenient release,
+creates duplicate task state, clears Mind obligations, or promises availability.
+Mind's unresolved `pending-release:` keys are read from its registries and
+completion records. A missing Mind checkout cannot establish release readiness.
+Trusted local snapshots are observation envelopes, not cryptographic proof of
+source authenticity. The collector performs public checks before exporting links.
+
+The board displays linked evidence and a portable Brain drafting prompt. Stale
+observations suppress current availability/update claims. Brain validates the
+projection and preserves observed state separately; it drafts for human approval,
+never sends. Unknown is not a claim that no work happened.

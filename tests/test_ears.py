@@ -177,7 +177,7 @@ def test_board_status_never_conflates_unknown_and_zero(case, expected):
         s["receipts"][0].update(status="partial", gaps=["unavailable"])
     result = board.render(s, CONFIG, BRAIN, rendered_at=rendered)
     assert json.loads(result["state.json"])["status"] == expected
-    assert "Delivery tracking is not active yet" in result["index.html"]
+    assert "No delivery evidence in this snapshot" in result["index.html"]
 
 
 def test_cli_round_trip_and_invalid_input(tmp_path):

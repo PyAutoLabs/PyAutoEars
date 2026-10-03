@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from .board import render
+from .followthrough import pending_releases
 from .collect import GitHub, collect, homes, repository, validate
 
 
@@ -34,7 +35,7 @@ def main(argv=None):
         if a.snapshot:
             snapshot = validate(json.loads(a.snapshot.read_text()))
         elif a.mind:
-            snapshot = validate(collect(GitHub(), homes(a.mind), config))
+            snapshot = validate(collect(GitHub(), homes(a.mind), config, pending_releases(a.mind)))
         else:
             raise ValueError("scan/board needs --mind or --snapshot")
         if a.mode == "check":

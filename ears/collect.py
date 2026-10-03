@@ -12,7 +12,7 @@ BROADCAST = {"Announcements", "Show and tell"}
 DISCUSSION_COMMENTS = """query($owner:String!, $name:String!, $number:Int!, $after:String) {
   repository(owner:$owner, name:$name) { discussion(number:$number) {
     comments(first:100, after:$after) {
-      nodes { id createdAt deletedAt author { login __typename } }
+      nodes { id body createdAt deletedAt author { login __typename } }
       pageInfo { hasNextPage endCursor }
     }
   } }
@@ -20,7 +20,7 @@ DISCUSSION_COMMENTS = """query($owner:String!, $name:String!, $number:Int!, $aft
 DISCUSSION_REPLIES = """query($id:ID!, $after:String) {
   node(id:$id) { ... on DiscussionComment {
     replies(first:100, after:$after) {
-      nodes { id createdAt deletedAt author { login __typename } }
+      nodes { id body createdAt deletedAt author { login __typename } }
       pageInfo { hasNextPage endCursor }
     }
   } }
@@ -156,6 +156,7 @@ def discussion_activity(api, repo, number, cap):
         if why:
             gaps.append(why)
     normalized = [{"created_at": x.get("createdAt"), "deleted_at": x.get("deletedAt"),
+                   "body": x.get("body"),
                    "user": {"login": x["author"].get("login"),
                             "type": x["author"].get("__typename")}
                    if isinstance(x.get("author"), dict) else None} for x in activity]
@@ -226,7 +227,7 @@ def waiting(events, selves):
     return bool(pending), pending
 
 
-def conversation(api, repo, raw, kind, config):
+def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
     number = raw.get("number")
     if not isinstance(number, int) or isinstance(number, bool) or number < 1:
         raise ReadError("invalid conversation number")
@@ -267,11 +268,18 @@ def conversation(api, repo, raw, kind, config):
     # Preserve the established hub policy; delivery follow-up is separate.
     if kind == "discussion" and (answered or category in BROADCAST):
         awaiting, since = False, None
+    if kind == "discussion" and (raw.get("state") == "closed" or raw.get("locked")):
+        awaiting, since = False, None
+    if kind == "discussion" and deliveries is not None:
+        from .followthrough import derive
+        deliveries.append(derive(api, f"https://github.com/{repo}/discussions/{number}",
+                                 [raw] + comments, config, complete, pending))
     url_kind = "pull" if kind == "pr" else path
     return {
         "id": f"{repo}/{url_kind}/{number}", "repo": repo, "number": number,
         "kind": kind, "url": f"https://github.com/{repo}/{url_kind}/{number}",
         "title": line(raw.get("title")) or "Untitled conversation",
+        "closed": raw.get("state") == "closed",
         "author": line((raw.get("user") or {}).get("login")),
         "category": line(category), "answered": answered,
         "awaiting_response": awaiting, "waiting_since": since,
@@ -282,11 +290,11 @@ def conversation(api, repo, raw, kind, config):
     }
 
 
-def collect(api, repo_homes, config):
+def collect(api, repo_homes, config, pending=None):
     hub = repository(config["hub"])
     selves = {x.casefold() for x in config["self_logins"]}
     stamp = now()
-    rows, receipts = [], []
+    rows, receipts, deliveries = [], [], []
     for repo in sorted(set(repo_homes) | {hub}):
         repository(repo)
         receipt = {"repo": repo, "checked_at": stamp, "status": "unavailable",
@@ -310,8 +318,14 @@ def collect(api, repo_homes, config):
             entries, complete, why = pages(api, f"repos/{repo}/{endpoint}?state=open", config["max_pages"])
             if why:
                 receipt["gaps"].append(f"{endpoint}: {why}")
+            if kind == "discussion":
+                closed, _, gap = pages(api, f"repos/{repo}/discussions?state=closed", config["max_pages"])
+                entries.extend(closed)
+                entries = list({e.get("number"): e for e in entries}.values())
+                if gap:
+                    receipt["gaps"].append(f"closed discussions: {gap}")
             for entry in entries:
-                if entry.get("state", "open") != "open" or entry.get("locked"):
+                if kind != "discussion" and (entry.get("state", "open") != "open" or entry.get("locked")):
                     continue
                 item_kind = "pr" if "pull_request" in entry else kind
                 is_human = human(entry.get("user"))
@@ -324,7 +338,7 @@ def collect(api, repo_homes, config):
                 if item_kind == "issue" and is_human and not external:
                     continue
                 try:
-                    row = conversation(api, repo, entry, item_kind, config)
+                    row = conversation(api, repo, entry, item_kind, config, deliveries, pending)
                 except ReadError as exc:
                     receipt["gaps"].append(str(exc))
                     continue
@@ -340,14 +354,15 @@ def collect(api, repo_homes, config):
         rows.extend(source_rows)
     return {"schema_version": 1, "generated": stamp,
             "conversations": list({r["id"]: r for r in rows}.values()),
-            "receipts": receipts}
+            "receipts": receipts, "follow_through": deliveries}
 
 
 def validate(snapshot):
     if not isinstance(snapshot, dict) or type(snapshot.get("schema_version")) is not int or snapshot.get("schema_version") != 1:
         raise ValueError("unsupported community snapshot")
     utc(snapshot.get("generated"))
-    if set(snapshot) != {"schema_version", "generated", "conversations", "receipts"}:
+    required = {"schema_version", "generated", "conversations", "receipts"}
+    if not required <= set(snapshot) or set(snapshot) - required - {"follow_through"}:
         raise ValueError("unknown snapshot fields; raw content must not be published")
     receipts = snapshot.get("receipts")
     rows = snapshot.get("conversations")
@@ -373,9 +388,11 @@ def validate(snapshot):
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("invalid conversation")
-        if set(row) != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
+        if set(row) - {"closed"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
                         "awaiting_response", "waiting_since", "review_requested", "coverage", "gaps", "cached", "feedback_report"}:
             raise ValueError("unknown conversation fields; raw content must not be published")
+        if "closed" in row and type(row["closed"]) is not bool:
+            raise ValueError("invalid closed state")
         if row.get("repo") not in public:
             raise ValueError("conversation lacks a public-source receipt")
         if row.get("kind") not in {"issue", "pr", "discussion"}:
@@ -400,4 +417,7 @@ def validate(snapshot):
         for key in ("review_requested", "answered", "cached", "feedback_report"):
             if type(row.get(key)) is not bool:
                 raise ValueError(f"invalid conversation {key}")
+    if "follow_through" in snapshot:
+        from .followthrough import validate as validate_delivery
+        validate_delivery(snapshot["follow_through"], rows)
     return snapshot

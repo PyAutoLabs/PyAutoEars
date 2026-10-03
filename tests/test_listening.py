@@ -120,7 +120,7 @@ def test_pr_review_replies_paginate_and_deleted_actor_degrades():
     assert row['awaiting_response'] is None and row['coverage'] == 'partial'
 
 
-def test_graphql_transport_only_fixed_queries_and_no_raw_body(monkeypatch):
+def test_graphql_transport_only_fixed_queries_and_no_mutations(monkeypatch):
     calls = []
     def run(args, **kw):
         calls.append((args, json.loads(kw['input'])))
@@ -130,7 +130,7 @@ def test_graphql_transport_only_fixed_queries_and_no_raw_body(monkeypatch):
     args, payload = calls[0]
     assert args == ['gh', 'api', 'graphql', '--input', '-']
     assert payload['query'] == collect.DISCUSSION_COMMENTS
-    assert 'body' not in payload['query'] and 'mutation' not in payload['query']
+    assert 'body' in payload['query'] and 'mutation' not in payload['query']
     assert payload['variables'] == {'owner': 'example', 'name': 'hub', 'number': 1}
 
 

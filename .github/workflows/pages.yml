@@ -1,0 +1,53 @@
+name: Ears board
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */2 * * *'
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ears-pages
+  cancel-in-progress: false
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: PyAutoEars
+      - uses: actions/checkout@v4
+        with:
+          repository: PyAutoLabs/PyAutoMind
+          path: PyAutoMind
+      - uses: actions/checkout@v4
+        with:
+          repository: PyAutoLabs/PyAutoBrain
+          path: PyAutoBrain
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'PyYAML>=6,<7'
+      - name: Collect and render public evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python PyAutoEars/bin/pyauto-ears board --mind PyAutoMind --brain PyAutoBrain --output _site
+      - name: Validate cockpit contract
+        run: python PyAutoBrain/board/_state.py _site/state.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: render
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

@@ -20,8 +20,8 @@ The board publishes HTML, Markdown, source receipts and the shared cockpit
 feed. Partial, unavailable and stale evidence is explicit; no raw transcripts
 or private-source conversations are exported.
 
-This bootstrap is awaiting integration: Brain's existing collector/cockpit
-has not switched to Ears. Follow-through and recurring-theme synthesis are
+The [live listening board](https://pyautolabs.github.io/PyAutoEars/) publishes
+Ears snapshots for Brain's Community adapter and a feed for the organ cockpit. Follow-through and recurring-theme synthesis are
 subsequent phases in Mind's `community-organ-birth` epic. The `/feedback`
 workflow is developed in Brain PR #454; standalone assistant rollout follows.
 

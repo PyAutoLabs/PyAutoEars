@@ -20,13 +20,13 @@ def load_module(path, name):
 def presentation(brain):
     theme = load_module(Path(brain) / "board/_theme.py", "ears_theme")
     state = load_module(Path(brain) / "board/_state.py", "ears_state")
-    # Additive local identity until the shared Brain identity phase merges.
-    theme.ORGANS["ears"] = {
+    # Compatibility fallback when paired with a Brain checkout before Ears integration.
+    theme.ORGANS.setdefault("ears", {
         "organ": "Ears", "tagline": "Listen. Understand. Follow through.",
         "ink_light": "#96520b", "ink_dark": "#ffc078", "glow": "#ffc078",
         "hero": ("#36200d", "#080503"),
-    }
-    theme.MARKS["ears"] = '<path d="M15 22c-5-18 23-23 24-4 0 9-10 10-11 19-1 8-12 8-13 0m6-17c-1-9 11-10 12-2 0 5-8 6-8 12"/>'
+    })
+    theme.MARKS.setdefault("ears", '<path d="M15 22c-5-18 23-23 24-4 0 9-10 10-11 19-1 8-12 8-13 0m6-17c-1-9 11-10 12-2 0 5-8 6-8 12"/>')
     return theme, state
 
 

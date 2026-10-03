@@ -104,7 +104,7 @@ def render(snapshot, config, brain, rendered_at=None):
             text += " — " + "; ".join(line(g) for g in r["gaps"])
         body.append("<li>" + esc(text) + "</li>")
         md.append("- " + esc(text))
-    body.append('</ul><p>Discussion coverage is limited to the REST comments returned by the source; nested replies are not independently verified.</p></section>')
+    body.append('</ul><p>Discussion comments and replies are read separately. Failed reads and pagination limits remain explicit coverage gaps; accepted answers do not establish delivery.</p></section>')
     for title, message in [("Following through", "Planned: linked development and release evidence. Delivery tracking is not active yet."),
                            ("Recurring feedback", "Planned: evidence-backed themes across independent reports. No themes have been inferred by this collector.")]:
         body.append(f"<section><h2>{title}</h2><p>{message}</p></section>")

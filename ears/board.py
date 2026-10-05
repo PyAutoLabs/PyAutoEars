@@ -101,14 +101,11 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
         {"href": "#activity", "label": "Recent activity"},
     ]
     body = [theme.hero('ears', 'Community board', navigation=navigation)]
-    checked = utc(snapshot['generated']).strftime('%d %b %Y, %H:%M UTC')
-    body.append('<p class="muted">Last checked <time datetime="' +
-                esc(snapshot['generated'], quote=True) + '">' + checked + '</time></p>')
     body.append('<p id="freshness" role="status"' + ('' if stale else ' hidden') +
                 '>These figures may be out of date. Use the community check-in below to update them.</p>')
     checkin = theme.portable_prompt(CHECKIN)
     body.append('<section class="checkin"><div class="checkin-head"><div><h2>One chat. The whole community.</h2>'
-                '<p>Review the queue, coordinate investigations and prepare replies together.</p></div>'
+                '</div>'
                 '<a class="hub-link" href="https://github.com/orgs/PyAutoLabs/discussions">Open Community Hub ↗</a></div>'
                 '<div class="checkin-controls"><div class="direction"><label for="direction">Optional direction</label>'
                 '<input id="direction" placeholder="Focus on a thread, add an idea, or cover everything"></div>' +
@@ -189,9 +186,7 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
     body.append('<section id="follow-through"><details class="follow-summary"><summary>Following through ' +
                 pill(f'{owed} updates owed' if not stale else 'Refresh needed', 'purple' if not stale else 'neutral') +
                 pill(f'{unlinked} delivery unknown') + '</summary>'
-                '<p>Tracks whether linked development reached a release and whether a contributor update is owed. '
-                'Open a conversation row above to see its issue, PR and release evidence.</p>'
-                '<p>Missing maintainer delivery links leave progress unknown; answered conversations can still have development pending.</p>')
+                )
     md.extend(['## Following through', '', f'{owed} observed updates owed; {unlinked} delivery unknown.', ''])
     if not delivery:
         body.append('<p>No delivery evidence in this snapshot.</p>')

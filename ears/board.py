@@ -8,6 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .collect import line, now, utc, validate
+from .presentation import CHECKIN, CSS, copy_button, pill, progress, waiting_label
 
 
 def load_module(path, name):
@@ -30,7 +31,7 @@ def presentation(brain):
     return theme, state
 
 
-def render(snapshot, config, brain, rendered_at=None):
+def render(snapshot, config, brain, rendered_at=None, plans=()):
     validate(snapshot)
     theme, contract = presentation(brain)
     current = utc(rendered_at or now())
@@ -74,85 +75,181 @@ def render(snapshot, config, brain, rendered_at=None):
     state = contract.build_state("ears", config["repo"], status, headline,
                                  snapshot["generated"], config["pages_url"], items,
                                  valid_until=fresh_until.isoformat())
-    esc = html.escape
-    body = [theme.hero("ears", "Community board"), f'<p role="status">{esc(headline)}</p>',
-            f'<p class="muted">Observed {esc(snapshot["generated"])}. Response states are heuristics; accepted does not mean delivered.</p>',
-            '<p><a href="https://github.com/orgs/PyAutoLabs/discussions">Open community hub</a></p>']
-    md = ["# PyAutoEars", "", headline, "", f"Observed: {snapshot['generated']}", ""]
-
-    def section(title, selected, empty):
-        body.append(f"<section><h2>{esc(title)}</h2>")
-        md.extend(["## " + title, ""])
-        if not selected:
-            body.append(f"<p>{esc(empty)}</p>")
-            md.extend([empty, ""])
-        for row in selected:
-            since = row.get("waiting_since")
-            timing = f"Waiting since {since}" if since else "Response age unknown" if row["awaiting_response"] is None else "Ours to watch"
-            prompt = theme.portable_prompt(f"/community triage {row['url']}")
-            body.append('<article class="conversation"><h3><a href="' + esc(row["url"], quote=True) + '">' +
-                        esc(row["title"]) + '</a></h3><p>' + esc(row["repo"] + " · " + timing) + '</p>' +
-                        ('<p>Feedback report (format marker only)</p>' if row.get("feedback_report") else '') +
-                        '<button type="button" data-copy="' + esc(prompt, quote=True) + '">Copy triage prompt</button>' +
-                        '<details><summary>Prompt</summary><pre>' + esc(prompt) + '</pre></details></article>')
-            md.extend([f"- [{esc(row['title']).replace('[', '&#91;').replace(']', '&#93;')}]({row['url']}) — {timing}",
-                       "", "```text", prompt, "```", ""])
-        body.append("</section>")
-
-    section("Needs your attention", attention,
-            "No attention items found in the observed data. Check coverage before concluding nobody is waiting.")
-    section("Unknown response state", unknown, "No unknown conversation states in the observed data.")
-    section("Community activity", [r for r in rows if r not in attention and r not in unknown],
-            "No additional conversations in the observed data.")
-    body.append('<section id="coverage"><h2>Listening coverage</h2><ul>')
-    md.extend(["## Listening coverage", ""])
-    for r in receipts:
-        text = f"{r['repo']}: {r['status']}"
-        if r["gaps"]:
-            text += " — " + "; ".join(line(g) for g in r["gaps"])
-        body.append("<li>" + esc(text) + "</li>")
-        md.append("- " + esc(text))
-    body.append('</ul><p>Discussion comments and replies are read separately. Failed reads and pagination limits remain explicit coverage gaps; accepted answers do not establish delivery.</p></section>')
-    body.append('<section><h2>Following through</h2><p>Explicit maintainer links only. Missing links mean unknown; settled conversations stay settled.</p>')
-    md.extend(["", "## Following through", ""])
-    if not delivery:
-        body.append('<p>No delivery evidence in this snapshot.</p>')
-        md.append('No delivery evidence in this snapshot.')
-    for row in delivery:
-        label = 'unknown (stale observation)' if stale else row['state'].replace('_', ' ')
-        if row['update_owed'] is True and not stale:
-            label += ' — contributor update owed'
-        body.append('<article><h3><a href="' + esc(row['discussion'], quote=True) + '">Discussion</a>: ' + esc(label) + '</h3><ul>')
-        md.append('- ' + row['discussion'] + ': ' + label)
-        for evidence in row['evidence']:
-            body.append('<li><a href="' + esc(evidence['url'], quote=True) + '">' + esc(evidence['kind'] + ': ' + evidence['url']) + '</a></li>')
-            md.append('  - ' + evidence['url'])
-        body.append('</ul>')
-        for gap in row['gaps']:
-            body.append('<p>' + esc(gap) + '</p>')
-        prompt = theme.portable_prompt('/community triage ' + row['discussion'] + ' — verify linked delivery evidence and draft a contributor update for approval; do not post')
-        body.append('<button type="button" data-copy="' + esc(prompt, quote=True) + '">Copy follow-through prompt</button><details><summary>Prompt</summary><pre>' + esc(prompt) + '</pre></details></article>')
-        md.extend(['', '```text', prompt, '```', ''])
-    body.append('</section>')
-    for title, message in [("Recurring feedback", "Planned: evidence-backed themes across independent reports. No themes have been inferred by this collector.")]:
-        body.append(f"<section><h2>{title}</h2><p>{message}</p></section>")
-        md.extend(["", "## " + title, "", message, ""])
-    body.append('<p id="copy-status" role="status" aria-live="polite"></p>')
-    script = 'const expires = ' + json.dumps(fresh_until.isoformat()) + ''';
-    if (Date.now() > Date.parse(expires)) {
-      document.querySelector('p[role="status"]').textContent = 'STALE — refresh required before judging the queue';
-    }
-    document.querySelectorAll('button[data-copy]').forEach(button => {
-      button.addEventListener('click', async () => {
-        const status = document.getElementById('copy-status');
-        try { await navigator.clipboard.writeText(button.dataset.copy); status.textContent = 'Prompt copied'; }
-        catch (_) { status.textContent = 'Copy unavailable. Open Prompt and select the text.'; }
-      });
-    });'''
-    css = theme.css("ears") + '\nbody{max-width:1000px;margin:auto;padding:16px} .conversation{padding:12px 0;border-bottom:1px solid #8885} pre{white-space:pre-wrap;overflow-wrap:anywhere} h3,a,li,p{overflow-wrap:anywhere} button{min-height:44px;cursor:pointer} section{margin:28px 0}'
-    page = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PyAutoEars community board</title><style>' + css + '</style></head><body><main>' + '\n'.join(body) + '</main><script>' + script + '</script></body></html>'
+    page, markdown = render_page(snapshot, theme, headline, stale, fresh_until,
+                                 attention, unknown, delivery, receipts, plans)
     badge = {"schemaVersion": 1, "label": "ears", "message": headline,
              "color": {"green": "green", "yellow": "yellow", "stale": "lightgrey", "grey": "lightgrey"}[status]}
-    return {"index.html": page, "dashboard.html": page, "dashboard.md": "\n".join(md),
+    return {"index.html": page, "dashboard.html": page, "dashboard.md": markdown,
             "state.json": json.dumps(state, indent=2) + "\n",
             "badge.json": json.dumps(badge, indent=2) + "\n"}
+
+
+def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknown,
+                delivery, receipts, plans):
+    esc = html.escape
+    rows = snapshot['conversations']
+    linked = {d['discussion']: d for d in delivery}
+    owed = sum(d['update_owed'] is True for d in delivery)
+    unlinked = sum(d['state'] == 'unknown' for d in delivery)
+    gaps = sum(r['status'] not in {'complete', 'excluded'} for r in receipts)
+    body = [theme.hero('ears', 'Community board')]
+    body.append('<p id="freshness" role="status"' + ('' if stale else ' hidden') +
+                '>STALE — refresh required before judging the queue</p>')
+    metrics = [(len(attention), 'Need attention', 'attention', 'amber'),
+               (len(unknown), 'Response unknown', 'unknown', 'neutral'),
+               (gaps, 'Source gaps', 'coverage', 'blue'),
+               (owed, 'Updates owed', 'follow-through', 'purple'),
+               (unlinked, 'Delivery unknown', 'follow-through', 'neutral')]
+    body.append('<nav class="metrics" aria-label="Community summary">' + ''.join(
+        f'<a class="metric {tone}" href="#{target}"><strong>{count}</strong><span>{label}</span></a>'
+        for count, label, target, tone in metrics) + '</nav>')
+    checkin = theme.portable_prompt(CHECKIN)
+    body.append('<section class="checkin"><div class="checkin-head"><div><h2>One chat. The whole community.</h2>'
+                '<p>Review the queue, coordinate investigations and prepare replies together.</p></div>'
+                '<a class="hub-link" href="https://github.com/orgs/PyAutoLabs/discussions">Open Community Hub ↗</a></div>'
+                '<div class="checkin-controls"><div class="direction"><label for="direction">Optional direction</label>'
+                '<input id="direction" placeholder="Focus on a thread, add an idea, or cover everything"></div>' +
+                copy_button(checkin, 'Copy community check-in', icon=False) + '</div>'
+                '<details><summary>Read the orchestration prompt</summary><textarea id="checkin-prompt" '
+                'aria-label="Community orchestration prompt" readonly>' + esc(checkin) + '</textarea></details></section>')
+    md = ['# PyAutoEars', '', headline, '', '## Community check-in', '', '```text', checkin, '```', '']
+
+    def section(title, key, selected, empty):
+        if key == 'unknown' and not selected:
+            body.append('<section id="unknown"><details class="follow-summary"><summary>Unknown response state ' +
+                        pill('0 additional') + '</summary><p>' + esc(empty) + '</p></details></section>')
+            md.extend(['## ' + title, '', empty, ''])
+            return
+        body.append(f'<section id="{key}"><div class="section-head"><h2>{esc(title)} '
+                    f'<span class="section-count">{len(selected)}</span></h2></div>')
+        md.extend(['## ' + title, '', '| Topic | Repository | Author | Type | Progress | Response |',
+                   '| --- | --- | --- | --- | --- | --- |'])
+        if not selected:
+            body.append(f'<p class="empty">{esc(empty)}</p></section>')
+            md.extend([empty, ''])
+            return
+        body.append(f'<div class="table-wrap" role="region" aria-label="{esc(title)}" tabindex="0">'
+                    '<table class="community"><thead><tr><th scope="col">Conversation / repository</th>'
+                    '<th scope="col">Author</th><th scope="col">Progress</th><th scope="col">Response</th>'
+                    '<th scope="col">Actions</th></tr></thead><tbody>')
+        for row in selected:
+            d = linked.get(row['url'])
+            label, tone = progress(row, d, stale, plans)
+            timing = waiting_label(row, snapshot['generated'])
+            kind = {'issue': 'Issue', 'pr': 'PR', 'discussion': 'Discussion'}[row['kind']]
+            prompt = theme.portable_prompt(f"/community triage {row['url']}")
+            details = '<p><a href="' + esc(row['url'], quote=True) + '">Open ' + kind.lower() + ' ↗</a></p>'
+            if row.get('waiting_since'):
+                details += '<p>Waiting since <time datetime="' + esc(row['waiting_since'], quote=True) + '">' + esc(utc(row['waiting_since']).strftime('%d %b %Y, %H:%M UTC')) + '</time></p>'
+            if stale:
+                details += '<p>Response and progress observations are stale. Refresh before acting.</p>'
+            if row['category']:
+                details += '<p>Category: ' + esc(row['category']) + '</p>'
+            if row['feedback_report']:
+                details += '<p>Feedback report (format marker only)</p>'
+            for gap in row['gaps']:
+                details += '<p>' + esc(line(gap)) + '</p>'
+            if d:
+                details += '<p>Delivery: ' + esc('unknown (stale observation)' if stale else d['state'].replace('_', ' ')) + '</p>'
+                for evidence in d['evidence']:
+                    details += '<p><a href="' + esc(evidence['url'], quote=True) + '">' + esc(evidence['kind'] + ': ' + evidence['url']) + '</a></p>'
+                for gap in d['gaps']:
+                    details += '<p>' + esc(line(gap)) + '</p>'
+                follow = theme.portable_prompt('/community triage ' + row['url'] + ' — verify linked delivery evidence and draft a contributor update for approval; do not post')
+                details += copy_button(follow, 'Copy follow-through prompt')
+            details += '<details><summary>Triage prompt</summary><pre>' + esc(prompt) + '</pre></details>'
+            author = esc(row['author']) if row['author'] else 'Unavailable'
+            author_html = '<span class="author">@' + author + '</span>' if row['author'] else '<span class="author-empty">Unavailable</span>'
+            note = '<span class="small-note owed-note">contributor update owed</span>' if d and d['update_owed'] is True and not stale else ''
+            if label == 'Plan recorded':
+                details += '<p>An issued Mind record explicitly links this issue and contains a plan.</p>'
+            body.append('<tr><td><details class="topic"><summary>' + esc(row['title']) +
+                        '<span class="topic-meta">' + esc(row['repo']) + ' · ' + kind + ' #' + str(row['number']) +
+                        '</span></summary><div class="topic-body">' + details + '</div></details></td><td>' + author_html +
+                        '</td><td>' + pill(label, tone) + note + '</td><td>' + esc(timing) +
+                        ('<span class="small-note">At last observation</span>' if stale else '') +
+                        '</td><td><div class="row-actions">' + copy_button(prompt, 'Copy triage prompt') +
+                        '<a class="source-action" aria-label="Open conversation on GitHub" title="Open conversation on GitHub" href="' +
+                        esc(row['url'], quote=True) + '">↗</a></div></td></tr>')
+            md_title = row["title"].replace("[", "&#91;").replace("]", "&#93;")
+            values = [f"[{md_title}]({row['url']})", row['repo'], row['author'] or 'Unavailable', kind, label, timing]
+            md.append('| ' + ' | '.join(esc(v).replace('|', '&#124;').replace('\n', ' ') for v in values) + ' |')
+        body.append('</tbody></table></div></section>')
+        md.append('')
+
+    section('Needs your attention', 'attention', attention,
+            'No attention items found in the observed data. Check coverage before concluding nobody is waiting.')
+    section('Unknown response state', 'unknown', [r for r in unknown if r not in attention],
+            'No additional unknown conversations. Any gaps on attention items appear in their details.')
+    section('Community activity', 'activity', [r for r in rows if r not in attention and r not in unknown],
+            'No additional conversations in the observed data.')
+    body.append('<section id="follow-through"><details class="follow-summary"><summary>Following through ' +
+                pill(f'{owed} updates owed' if not stale else 'Refresh needed', 'purple' if not stale else 'neutral') +
+                pill(f'{unlinked} delivery unknown') + '</summary>'
+                '<p>Tracks whether linked development reached a release and whether a contributor update is owed. '
+                'Open a conversation row above to see its issue, PR and release evidence.</p>'
+                '<p>Missing maintainer delivery links leave progress unknown; answered conversations can still have development pending.</p>')
+    md.extend(['## Following through', '', f'{owed} observed updates owed; {unlinked} delivery unknown.', ''])
+    if not delivery:
+        body.append('<p>No delivery evidence in this snapshot.</p>')
+    body.append('</details></section>')
+    body.append('<details><summary>Recurring feedback</summary><p>Planned: evidence-backed themes across independent reports. No themes have been inferred by this collector.</p></details>')
+    body.append('<p id="copy-status" role="status" aria-live="polite"></p><pre id="copy-fallback" tabindex="-1" hidden></pre>')
+    body.append('<section id="coverage"><h2>Listening coverage</h2><div class="table-wrap" role="region" aria-label="Listening coverage" tabindex="0">'
+                '<table class="coverage"><thead><tr><th scope="col">Repository</th><th scope="col">Coverage</th>'
+                '<th scope="col">Checked (UTC)</th><th scope="col">Details</th></tr></thead><tbody>')
+    md.extend(['## Listening coverage', '', '| Repository | Coverage | Checked | Details |', '| --- | --- | --- | --- |'])
+    for r in receipts:
+        tone = {'complete': 'green', 'partial': 'amber', 'unavailable': 'purple', 'excluded': 'neutral'}[r['status']]
+        date = utc(r['checked_at']).strftime('%d %b %Y, %H:%M')
+        gap = '; '.join(line(g) for g in r['gaps']) or ('Public source checked' if r['status'] == 'complete' else 'No public data collected')
+        body.append('<tr><td>' + esc(r['repo']) + '</td><td>' + pill(r['status'].title(), tone) + '</td><td><time datetime="' +
+                    esc(r['checked_at'], quote=True) + '">' + date + '</time></td><td>' + esc(gap) + '</td></tr>')
+        md.append('| ' + ' | '.join(esc(v).replace('|', '&#124;') for v in [r['repo'], r['status'], date, gap]) + ' |')
+    if not receipts:
+        body.append('<tr><td colspan="4">Coverage unknown — no source receipts.</td></tr>')
+    body.append('</tbody></table></div></section>')
+    script = 'const expires = ' + json.dumps(fresh_until.isoformat()) + ';\n' + SCRIPT
+    page = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>PyAutoEars community board</title><style>' + theme.css('ears') + CSS + '</style></head><body><main>' +
+            '\n'.join(body) + '</main><script>' + script + '</script></body></html>')
+    return page, '\n'.join(md) + '\n'
+
+
+SCRIPT = r"""
+function checkFreshness() {
+  if (Date.now() > Date.parse(expires)) {
+    document.getElementById('freshness').hidden = false;
+    document.querySelectorAll('.community .badge').forEach(b => {b.textContent = 'Refresh needed'; b.className = 'badge neutral'});
+    document.querySelectorAll('.owed-note').forEach(n => n.hidden = true);
+    const follow = document.querySelector('#follow-through .badge');
+    follow.textContent = 'Refresh needed'; follow.className = 'badge neutral';
+  }
+}
+checkFreshness();
+window.addEventListener('pageshow', checkFreshness);
+document.addEventListener('visibilitychange', checkFreshness);
+const checkinButton = document.querySelector('.copy-action.primary');
+const basePrompt = checkinButton.dataset.copy;
+document.getElementById('direction').addEventListener('input', event => {
+  const direction = event.target.value.trim();
+  const prompt = basePrompt + (direction ? '\n\nOptional direction: ' + direction : '');
+  checkinButton.dataset.copy = prompt;
+  document.getElementById('checkin-prompt').value = prompt;
+});
+document.querySelectorAll('button[data-copy]').forEach(button => {
+  button.addEventListener('click', async () => {
+    const status = document.getElementById('copy-status');
+    const fallback = document.getElementById('copy-fallback');
+    try {
+      await navigator.clipboard.writeText(button.dataset.copy);
+      status.textContent = 'Prompt copied'; fallback.hidden = true;
+    } catch (_) {
+      status.textContent = 'Copy unavailable. Select the prompt below.';
+      fallback.textContent = button.dataset.copy; fallback.hidden = false; fallback.focus();
+      const range = document.createRange(); range.selectNodeContents(fallback);
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    }
+  });
+});
+"""

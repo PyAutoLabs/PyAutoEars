@@ -170,3 +170,32 @@ The board displays linked evidence and a portable Brain drafting prompt. Stale
 observations suppress current availability/update claims. Brain validates the
 projection and preserves observed state separately; it drafts for human approval,
 never sends. Unknown is not a claim that no work happened.
+
+## Community board interactions
+
+The top check-in prompt covers the full community queue in one ongoing chat;
+optional direction is appended to both its preview and copied text. It routes
+judgement through Brain's Community conductor and supports bounded delegation.
+It does not authorize posting replies or bypass development approval gates.
+
+Attention and activity use the same expandable table. Each row displays the
+source author, repository/type, response age at snapshot observation, and a
+separate development-progress badge. Open the topic for exact waiting time,
+coverage gaps, linked delivery evidence and the triage prompt. Copy icons have
+accessible names; when clipboard access fails, selectable text is exposed.
+Tables scroll within their own region on narrow screens.
+
+Progress comes from the source kind and existing verified follow-through state:
+issue linked, PR open, merged/unreleased, released or declined. An accepted answer
+alone never establishes development progress. Incomplete or stale observations
+cannot establish current progress. Following through is a collapsed explanation;
+per-conversation evidence lives in the rows. Listening coverage is the last section.
+
+When `board --mind <checkout>` is used, the renderer also checks `active/` and
+`complete/` Mind markdown records for an exact `Issue:` header and a nonempty
+plan section outside code fences. Only matching observed issues (or verified
+linked accepted issues) get a **Plan recorded** badge. Draft prompts and incidental
+URL mentions do not qualify. This means a plan exists, not that it is approved
+or implemented. This hint is render-time only: snapshot v1, delivery states and
+Brain's cockpit feed remain unchanged. Rendering a snapshot without `--mind`
+keeps source/delivery badges and makes no plan claim.

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from .board import render
+from .presentation import recorded_plans
 from .followthrough import pending_releases
 from .collect import GitHub, collect, homes, repository, validate
 
@@ -48,7 +49,7 @@ def main(argv=None):
             else:
                 print(payload, end="")
         else:
-            surfaces = render(snapshot, config, a.brain)
+            surfaces = render(snapshot, config, a.brain, plans=recorded_plans(a.mind) if a.mind else ())
             a.output.mkdir(parents=True, exist_ok=True)
             for name, text in surfaces.items():
                 (a.output / name).write_text(text)

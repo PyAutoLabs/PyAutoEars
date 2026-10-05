@@ -97,11 +97,7 @@ CSS = '''
 body{max-width:1240px;padding:0 24px 48px}main{min-width:0}
 section{margin:32px 0}h2{font-size:1.2rem}button,input,textarea{font:inherit}
 :focus-visible{outline:3px solid var(--accent);outline-offset:4px}
-.metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:26px 0}
-.metric{display:block;border:1px solid var(--line);border-top:3px solid currentColor;border-radius:12px;padding:17px 18px;background:var(--btn);text-decoration:none}
-.metric:hover{transform:translateY(-2px);text-decoration:none;box-shadow:0 4px 16px #0001}
-.metric strong{display:block;font-size:2.25rem;line-height:1.15;letter-spacing:-.04em;color:inherit}
-.metric span{display:block;margin-top:7px;font-size:.85rem;color:var(--fg)}
+
 .amber{color:var(--accent)}.blue{color:#235ec1}.purple{color:#7542b8}.green{color:var(--ok)}.neutral{color:var(--muted)}
 .checkin{padding:24px;border:1px solid var(--edge);border-radius:16px;background:linear-gradient(120deg,var(--tint),var(--bg))}
 .checkin h2{margin:0;border:0;padding:0;font-size:1.45rem}.checkin h2:after{display:none}
@@ -131,5 +127,5 @@ td{padding:14px;border-top:1px solid var(--line);vertical-align:top}tbody tr:hov
 #copy-status{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:10;max-width:90vw;border-radius:10px;background:var(--fg);color:var(--bg);box-shadow:0 4px 24px #0003;padding:12px 18px;margin:0}#copy-status:empty{display:none}
 #copy-fallback{white-space:pre-wrap;padding:16px;border:1px solid var(--edge);background:var(--btn)}
 @media(prefers-color-scheme:dark){.blue{color:#83b4ff}.purple{color:#c4a0ff}}
-@media(max-width:760px){body{padding:0 16px 32px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.metric:last-child{grid-column:1/-1}.metric{padding:12px 15px}.metric strong{font-size:1.8rem}.checkin{padding:18px}.checkin-head{display:block}.hub-link{margin:0 0 16px}.checkin-controls{display:block}.checkin-controls button{margin-top:12px;width:100%}table.community{min-width:740px}table.coverage{min-width:650px}.table-wrap:focus-visible{outline-offset:2px}}
+@media(max-width:760px){body{padding:0 16px 32px}.checkin{padding:18px}.checkin-head{display:block}.hub-link{margin:0 0 16px}.checkin-controls{display:block}.checkin-controls button{margin-top:12px;width:100%}table.community{min-width:740px}table.coverage{min-width:650px}.table-wrap:focus-visible{outline-offset:2px}}
 '''

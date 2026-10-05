@@ -92,17 +92,20 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
     owed = sum(d['update_owed'] is True for d in delivery)
     unlinked = sum(d['state'] == 'unknown' for d in delivery)
     gaps = sum(r['status'] not in {'complete', 'excluded'} for r in receipts)
-    body = [theme.hero('ears', 'Community board')]
+    navigation = [
+        {"href": "#attention", "label": "Need attention", "count": len(attention)},
+        {"href": "#unknown", "label": "Response unknown", "count": len(unknown)},
+        {"href": "#coverage", "label": "Source gaps", "count": gaps},
+        {"href": "#follow-through", "label": "Updates owed", "count": owed},
+        {"href": "#follow-through", "label": "Delivery unknown", "count": unlinked},
+        {"href": "#activity", "label": "Recent activity"},
+    ]
+    body = [theme.hero('ears', 'Community board', navigation=navigation)]
+    checked = utc(snapshot['generated']).strftime('%d %b %Y, %H:%M UTC')
+    body.append('<p class="muted">Last checked <time datetime="' +
+                esc(snapshot['generated'], quote=True) + '">' + checked + '</time></p>')
     body.append('<p id="freshness" role="status"' + ('' if stale else ' hidden') +
-                '>STALE — refresh required before judging the queue</p>')
-    metrics = [(len(attention), 'Need attention', 'attention', 'amber'),
-               (len(unknown), 'Response unknown', 'unknown', 'neutral'),
-               (gaps, 'Source gaps', 'coverage', 'blue'),
-               (owed, 'Updates owed', 'follow-through', 'purple'),
-               (unlinked, 'Delivery unknown', 'follow-through', 'neutral')]
-    body.append('<nav class="metrics" aria-label="Community summary">' + ''.join(
-        f'<a class="metric {tone}" href="#{target}"><strong>{count}</strong><span>{label}</span></a>'
-        for count, label, target, tone in metrics) + '</nav>')
+                '>These figures may be out of date. Use the community check-in below to update them.</p>')
     checkin = theme.portable_prompt(CHECKIN)
     body.append('<section class="checkin"><div class="checkin-head"><div><h2>One chat. The whole community.</h2>'
                 '<p>Review the queue, coordinate investigations and prepare replies together.</p></div>'

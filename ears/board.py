@@ -104,7 +104,7 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
     body.append('<p id="freshness" role="status"' + ('' if stale else ' hidden') +
                 '>These figures may be out of date. Use the community check-in below to update them.</p>')
     checkin = theme.portable_prompt(CHECKIN)
-    body.append('<section class="checkin"><div class="checkin-head"><div><h2>One chat. The whole community.</h2>'
+    body.append('<section class="checkin"><div class="checkin-head"><div>' + theme.prompt_heading('ears') +
                 '</div>'
                 '<a class="hub-link" href="https://github.com/orgs/PyAutoLabs/discussions">Open Community Hub ↗</a></div>'
                 '<div class="checkin-controls"><div class="direction"><label for="direction">Optional direction</label>'

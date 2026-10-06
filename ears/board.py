@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import importlib.util
 import json
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -76,7 +77,7 @@ def render(snapshot, config, brain, rendered_at=None, plans=()):
                                  snapshot["generated"], config["pages_url"], items,
                                  valid_until=fresh_until.isoformat())
     page, markdown = render_page(snapshot, theme, headline, stale, fresh_until,
-                                 attention, unknown, delivery, receipts, plans)
+                                 attention, unknown, delivery, receipts, plans, config)
     badge = {"schemaVersion": 1, "label": "ears", "message": headline,
              "color": {"green": "green", "yellow": "yellow", "stale": "lightgrey", "grey": "lightgrey"}[status]}
     return {"index.html": page, "dashboard.html": page, "dashboard.md": markdown,
@@ -85,7 +86,7 @@ def render(snapshot, config, brain, rendered_at=None, plans=()):
 
 
 def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknown,
-                delivery, receipts, plans):
+                delivery, receipts, plans, config):
     esc = html.escape
     rows = snapshot['conversations']
     linked = {d['discussion']: d for d in delivery}
@@ -103,15 +104,15 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
     body = [theme.hero('ears', 'Community board', navigation=navigation)]
     body.append('<p id="freshness" role="status"' + ('' if stale else ' hidden') +
                 '>These figures may be out of date. Use the community check-in below to update them.</p>')
+    work_links = [{"label": "Open Community Hub ↗",
+                   "href": "https://github.com/orgs/PyAutoLabs/discussions"}]
+    repositories = [config["repo"], *(r["repo"] for r in receipts if r.get("public_verified") is True)]
+    for repository in dict.fromkeys(repositories):
+        if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+            work_links.append({"label": repository, "href": "https://github.com/" + repository})
     checkin = theme.portable_prompt(CHECKIN)
-    body.append('<section class="checkin"><div class="checkin-head"><div>' + theme.prompt_heading('ears') +
-                '</div>'
-                '<a class="hub-link" href="https://github.com/orgs/PyAutoLabs/discussions">Open Community Hub ↗</a></div>'
-                '<div class="checkin-controls"><div class="direction"><label for="direction">Optional direction</label>'
-                '<input id="direction" placeholder="Focus on a thread, add an idea, or cover everything"></div>' +
-                copy_button(checkin, 'Copy community check-in', icon=False) + '</div>'
-                '<details><summary>Read the orchestration prompt</summary><textarea id="checkin-prompt" '
-                'aria-label="Community orchestration prompt" readonly>' + esc(checkin) + '</textarea></details></section>')
+    body.append(theme.orchestration_panel("ears", "", "", CHECKIN,
+                work_links=work_links, copy_label="Copy community check-in", organ="ears"))
     md = ['# PyAutoEars', '', headline, '', '## Community check-in', '', '```text', checkin, '```', '']
 
     def section(title, key, selected, empty):
@@ -210,7 +211,7 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
     script = 'const expires = ' + json.dumps(fresh_until.isoformat()) + ';\n' + SCRIPT
     page = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>PyAutoEars community board</title><style>' + theme.css('ears') + CSS + '</style></head><body><main>' +
-            '\n'.join(body) + '</main><script>' + script + '</script></body></html>')
+            '\n'.join(body) + '</main><script>' + theme.JS + script + '</script></body></html>')
     return page, '\n'.join(md) + '\n'
 
 
@@ -227,14 +228,6 @@ function checkFreshness() {
 checkFreshness();
 window.addEventListener('pageshow', checkFreshness);
 document.addEventListener('visibilitychange', checkFreshness);
-const checkinButton = document.querySelector('.copy-action.primary');
-const basePrompt = checkinButton.dataset.copy;
-document.getElementById('direction').addEventListener('input', event => {
-  const direction = event.target.value.trim();
-  const prompt = basePrompt + (direction ? '\n\nOptional direction: ' + direction : '');
-  checkinButton.dataset.copy = prompt;
-  document.getElementById('checkin-prompt').value = prompt;
-});
 document.querySelectorAll('button[data-copy]').forEach(button => {
   button.addEventListener('click', async () => {
     const status = document.getElementById('copy-status');

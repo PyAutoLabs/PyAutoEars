@@ -106,3 +106,25 @@ def test_cli_reads_mind_plan_hints_when_rendering_snapshot(tmp_path):
     output = tmp_path / 'site'
     assert main(['board', '--snapshot', str(source), '--brain', str(BRAIN), '--mind', str(mind), '--output', str(output)]) == 0
     assert '>Plan recorded<' in (output / 'index.html').read_text()
+
+
+def test_shared_checkin_keeps_public_destinations_and_inert_payload():
+    import html
+    import re
+    from ears.presentation import CHECKIN
+
+    snapshot = fixture()
+    snapshot['receipts'].append({'repo': 'private/unknown', 'checked_at': STAMP,
+                                 'status': 'unavailable', 'public_verified': False, 'gaps': []})
+    page = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP)['index.html']
+    panel = re.search(r'<section class="orchestration-panel".*?</section>', page, re.S)[0]
+    assert 'Open Community Hub ↗' in panel
+    assert 'https://github.com/' + CONFIG['repo'] in panel
+    assert 'https://github.com/private/unknown' not in panel
+    preview = html.unescape(re.search(r'data-orchestration-prompt readonly rows="8">(.*?)</textarea>', panel, re.S)[1])
+    assert preview.startswith(CHECKIN + "\n\nWork on GitHub:\n")
+    snapshot['receipts'][-1]['public_verified'] = True
+    page = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP)['index.html']
+    assert '- private/unknown: https://github.com/private/unknown' in html.unescape(page)
+    assert 'orchestrationSync' in page
+    assert 'const checkinButton' not in page

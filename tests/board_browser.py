@@ -47,6 +47,10 @@ def main():
                     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth"), (width, scheme)
                     page.screenshot(path=str(output / f"synthetic-{width}-{scheme}.png"), full_page=True)
             assert not page.locator('#freshness').is_visible()
+            assert page.locator('.orchestration-panel a').count() == 2
+            assert page.locator('#unknown, #follow-through').count() == 0
+            for link in page.locator('a[href^="#"]').all():
+                assert page.locator(link.get_attribute('href')).count() == 1
             page.get_by_role('link', name='Open Community Hub').focus()
             assert page.get_by_role('link', name='Open Community Hub').evaluate('(e) => e === document.activeElement')
             page.locator('#orchestration-ears-direction').fill('Prioritize unanswered questions')

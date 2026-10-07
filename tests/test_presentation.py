@@ -19,7 +19,9 @@ def test_authors_tables_and_details_do_not_execute_source_text():
     assert '<details class="topic">' in page
     assert 'aria-label="Copy triage prompt"' in page
     assert 'Response states are heuristics' not in page
-    assert page.index('id="follow-through"') < page.index('id="coverage"')
+    assert page.index('id="activity"') < page.index('id="coverage"')
+    assert 'id="follow-through"' not in page
+    assert 'id="unknown"' not in page
     assert 'Open Community Hub ↗' in page
 
 
@@ -36,7 +38,7 @@ def test_activity_includes_author_and_answer_is_not_delivery():
     snapshot = delivery_snapshot()
     snapshot['follow_through'][0].update(state='unknown', update_owed=None, evidence=[])
     page = board.render(snapshot, CONFIG, BRAIN, rendered_at=snapshot['generated'])['index.html']
-    activity = page.split('id="activity"')[1].split('id="follow-through"')[0]
+    activity = page.split('id="activity"')[1].split('id="coverage"')[0]
     assert '@Reporter' in activity
     assert '>Released<' not in activity
 
@@ -125,6 +127,25 @@ def test_shared_checkin_keeps_public_destinations_and_inert_payload():
     assert preview.startswith(CHECKIN + "\n\nWork on GitHub:\n")
     snapshot['receipts'][-1]['public_verified'] = True
     page = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP)['index.html']
-    assert '- private/unknown: https://github.com/private/unknown' in html.unescape(page)
+    panel = re.search(r'<section class="orchestration-panel".*?</section>', page, re.S)[0]
+    assert 'https://github.com/private/unknown' not in panel
+    assert len(re.findall(r'<a ', panel)) == 2
     assert 'orchestrationSync' in page
     assert 'const checkinButton' not in page
+
+
+def test_unknown_response_remains_in_activity_without_removed_sections():
+    snapshot = fixture()
+    snapshot['conversations'][0].update(awaiting_response=None, coverage='partial',
+                                        review_requested=False)
+    result = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP)
+    page = result['index.html']
+    activity = page.split('id="activity"')[1].split('id="coverage"')[0]
+    assert snapshot['conversations'][0]['url'] in activity
+    assert page.count('<details class="topic">') == 1
+    for surface in (page, result['dashboard.md']):
+        assert 'Unknown response state' not in surface
+        assert 'Following through' not in surface
+    assert 'href="#unknown"' not in page
+    assert 'href="#follow-through"' not in page
+    assert any(item['state'] == 'unknown' for item in json.loads(result['state.json'])['items'])

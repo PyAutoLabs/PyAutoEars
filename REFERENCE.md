@@ -188,8 +188,13 @@ Tables scroll within their own region on narrow screens.
 Progress comes from the source kind and existing verified follow-through state:
 issue linked, PR open, merged/unreleased, released or declined. An accepted answer
 alone never establishes development progress. Incomplete or stale observations
-cannot establish current progress. Following through is a collapsed explanation;
-per-conversation evidence lives in the rows. Listening coverage is the last section.
+cannot establish current progress. Conversations with unknown response states appear
+in Community activity unless they already need attention. Per-conversation delivery
+evidence lives in the rows. Listening coverage is the last section.
+
+The check-in panel links only to the Community Hub and PyAutoEars. Monitored
+repositories remain listed in listening coverage; they do not each add a link
+to the check-in panel or its copied prompt.
 
 When `board --mind <checkout>` is used, the renderer also checks `active/` and
 `complete/` Mind markdown records for an exact `Issue:` header and a nonempty

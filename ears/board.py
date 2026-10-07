@@ -205,7 +205,7 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
     page = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>PyAutoEars community board</title><style>' + theme.css('ears') + CSS + '</style></head><body><main>' +
             '\n'.join(body) + '</main><script>' + theme.JS + script + '</script></body></html>')
-    return page, '\n'.join(md) + '\n'
+    return theme.section_layout(page), '\n'.join(md) + '\n'
 
 
 SCRIPT = r"""

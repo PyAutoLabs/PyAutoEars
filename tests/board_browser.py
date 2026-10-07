@@ -55,6 +55,13 @@ def main():
                     page.emulate_media(color_scheme=scheme)
                     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth"), (width, scheme)
                     page.screenshot(path=str(output / f"synthetic-{width}-{scheme}.png"), full_page=True)
+            # Major sections start collapsed (PyAutoBrain#490); the nav card reveals its target.
+            sections = page.locator('details.board-section')
+            assert sections.count() == 3
+            assert sections.evaluate_all('(nodes) => nodes.every((d) => !d.open)')
+            assert not page.locator('#attention').is_visible()
+            page.locator('.board-nav-card[href="#attention"]').click()
+            page.wait_for_function("document.getElementById('attention').closest('details.board-section').open")
             followup_topic = page.locator('#attention .topic').filter(has_text='New request on a closed discussion')
             followup_topic.locator(':scope > summary').click()
             assert 'Closed · Answered' in followup_topic.inner_text()
@@ -85,6 +92,8 @@ def main():
             page.wait_for_function("document.getElementById('copy-status').textContent === 'Prompt copied'")
             copied = page.evaluate("navigator.clipboard.readText()")
             assert "community" in copied and "https://github.com/example/lib/issues/1" in copied
+            page.locator('.board-nav-card[href="#activity"]').click()
+            page.wait_for_function("document.getElementById('activity').closest('details.board-section').open")
             page.locator('#activity .topic summary').first.click()
             follow = page.get_by_role("button", name="Copy follow-through prompt").first
             follow.click()

@@ -47,7 +47,10 @@ def main():
                     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth"), (width, scheme)
                     page.screenshot(path=str(output / f"synthetic-{width}-{scheme}.png"), full_page=True)
             assert not page.locator('#freshness').is_visible()
-            assert page.locator('.orchestration-panel a').count() == 2
+            assert page.locator('.orchestration-links a').count() == 2
+            update = page.locator('.orchestration-panel [data-refresh-link]')
+            assert update.count() == 1
+            assert update.get_attribute('href') == f"https://github.com/{CONFIG['repo']}/actions/workflows/pages.yml"
             assert page.locator('#unknown, #follow-through').count() == 0
             for link in page.locator('a[href^="#"]').all():
                 assert page.locator(link.get_attribute('href')).count() == 1

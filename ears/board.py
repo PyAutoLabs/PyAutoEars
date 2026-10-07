@@ -106,7 +106,13 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
         work_links.append({"label": repository, "href": "https://github.com/" + repository})
     checkin = theme.portable_prompt(CHECKIN)
     body.append(theme.orchestration_panel("ears", "", "", CHECKIN,
-                work_links=work_links, copy_label="Copy community check-in", organ="ears"))
+                work_links=work_links, copy_label="Copy community check-in", organ="ears",
+                refreshed_at=(snapshot.get("generated")
+                              if any(r["status"] == "complete" for r in receipts)
+                              and all(r["status"] in {"complete", "excluded"} for r in receipts)
+                              else None),
+                refresh_url=(f"https://github.com/{repository}/actions/workflows/pages.yml"
+                             if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) else None)))
     md = ['# PyAutoEars', '', headline, '', '## Community check-in', '', '```text', checkin, '```', '']
 
     def section(title, key, selected, empty):

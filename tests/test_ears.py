@@ -217,3 +217,27 @@ def test_bot_pr_requested_review_is_not_lost():
     api = API({listing(): [pr], "repos/example/lib/pulls/1": {"requested_reviewers": [user("Second")]}})
     row = collect.collect(api, ["example/lib"], CONFIG)["conversations"][0]
     assert row["review_requested"] is True and row["awaiting_response"] is False
+
+
+def test_panel_refresh_uses_snapshot_capture_and_owner_workflow(monkeypatch):
+    theme = board.presentation(BRAIN)[0]
+    calls = []
+    monkeypatch.setattr(theme, "orchestration_panel", lambda *a, **kw: calls.append(kw) or "")
+    monkeypatch.setattr(board, "presentation", lambda brain: (theme, board.load_module(BRAIN / "board/_state.py", "freshness_state")))
+    snap = fixture()
+    board.render(snap, CONFIG, BRAIN, rendered_at="2026-10-07T12:00:00Z")
+    assert calls[0]["refreshed_at"] == snap["generated"]
+    assert calls[0]["refresh_url"] == f"https://github.com/{CONFIG['repo']}/actions/workflows/pages.yml"
+
+    for status in ("partial", "unavailable"):
+        snap["receipts"][0]["status"] = status
+        board.render(snap, CONFIG, BRAIN, rendered_at=STAMP)
+        assert calls[-1]["refreshed_at"] is None
+    for receipt in snap["receipts"]:
+        receipt["status"] = "excluded"
+    board.render(snap, CONFIG, BRAIN, rendered_at=STAMP)
+    assert calls[-1]["refreshed_at"] is None
+    snap["receipts"] = []
+    snap["conversations"] = []
+    board.render(snap, CONFIG, BRAIN, rendered_at=STAMP)
+    assert calls[-1]["refreshed_at"] is None

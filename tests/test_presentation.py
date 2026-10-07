@@ -129,7 +129,9 @@ def test_shared_checkin_keeps_public_destinations_and_inert_payload():
     page = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP)['index.html']
     panel = re.search(r'<section class="orchestration-panel".*?</section>', page, re.S)[0]
     assert 'https://github.com/private/unknown' not in panel
-    assert len(re.findall(r'<a ', panel)) == 2
+    assert len(re.findall(r'<a ', panel)) == 3
+    assert f'https://github.com/{CONFIG["repo"]}/actions/workflows/pages.yml' in panel
+    assert 'Last updated unavailable' in panel
     assert 'orchestrationSync' in page
     assert 'const checkinButton' not in page
 

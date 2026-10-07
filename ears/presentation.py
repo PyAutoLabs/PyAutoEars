@@ -17,6 +17,11 @@ CHECKIN = (
     "response states, recent activity and contributor updates owed. Check linked plans, "
     "issues and PRs for progress. Give me a concise priority list explaining who is waiting, "
     "what they need, what has changed and the next useful action.\n\n"
+    "Review new comments on answered or closed threads, including nested replies. Distinguish "
+    "acknowledgements from actionable requests or uncertain follow-ups. Contributors may lack "
+    "permission to reopen; a comment is enough to request attention. Check the acting account's "
+    "permission before recommending who should reopen, and route to a maintainer if unavailable "
+    "or unknown. Reopening, unlocking and clearing an answer are separate actions.\n\n"
     "When I name a thread, contributor, question or idea, make that the main focus. Help me "
     "understand the conversation, investigate the reported problem, identify missing "
     "information, discuss possible responses or prepare a contributor handoff. Bring in "
@@ -102,6 +107,8 @@ def progress(row, delivery, stale, plans):
 
 
 def waiting_label(row, observed):
+    if row.get('follow_up', {}).get('review_needed') is True:
+        return 'Follow-up needs review'
     since = row.get('waiting_since')
     if since:
         duration = utc(observed) - utc(since)
@@ -118,6 +125,17 @@ def waiting_label(row, observed):
     if row['answered']:
         return 'Answered'
     return 'Watching'
+
+
+def triage_prompt(row):
+    prompt = f"/community triage {row['url']}"
+    if "follow_up" in row:
+        prompt += (" — review post-settlement comments and nested replies for actionable requests, "
+                   "acknowledgements or uncertainty. Contributors may lack permission to reopen; "
+                   "check the acting account's permission and route to a maintainer if unknown or "
+                   "unavailable. Recommend a response, reopening or linked new task; do not post "
+                   "or change thread state without explicit authorization.")
+    return prompt
 
 
 CSS = '''

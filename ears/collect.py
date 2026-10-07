@@ -12,7 +12,7 @@ BROADCAST = {"Announcements", "Show and tell"}
 DISCUSSION_COMMENTS = """query($owner:String!, $name:String!, $number:Int!, $after:String) {
   repository(owner:$owner, name:$name) { discussion(number:$number) {
     comments(first:100, after:$after) {
-      nodes { id body createdAt deletedAt author { login __typename } }
+      nodes { id databaseId body createdAt deletedAt author { login __typename } }
       pageInfo { hasNextPage endCursor }
     }
   } }
@@ -20,9 +20,15 @@ DISCUSSION_COMMENTS = """query($owner:String!, $name:String!, $number:Int!, $aft
 DISCUSSION_REPLIES = """query($id:ID!, $after:String) {
   node(id:$id) { ... on DiscussionComment {
     replies(first:100, after:$after) {
-      nodes { id body createdAt deletedAt author { login __typename } }
+      nodes { id databaseId body createdAt deletedAt author { login __typename } }
       pageInfo { hasNextPage endCursor }
     }
+  } }
+}"""
+
+DISCUSSION_STATE = """query($owner:String!, $name:String!, $number:Int!) {
+  repository(owner:$owner, name:$name) { discussion(number:$number) {
+    closed closedAt answerChosenAt
   } }
 }"""
 
@@ -86,6 +92,23 @@ class GitHub:
             return json.loads(r.stdout)
         except ValueError:
             raise ReadError("invalid JSON response") from None
+
+    def discussion_state(self, repo, number):
+        owner, name = repository(repo).split("/")
+        payload = json.dumps({"query": DISCUSSION_STATE,
+                              "variables": {"owner": owner, "name": name, "number": number}})
+        try:
+            r = subprocess.run([self.binary, "api", "graphql", "--input", "-"],
+                               input=payload, capture_output=True, text=True, timeout=60)
+            result = json.loads(r.stdout)
+            if r.returncode or not isinstance(result, dict) or result.get("errors"):
+                raise ReadError("Discussion settlement read failed")
+            detail = result["data"]["repository"]["discussion"]
+            if not isinstance(detail, dict) or type(detail.get("closed")) is not bool:
+                raise ReadError("Discussion settlement unavailable")
+            return detail
+        except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+            raise ReadError("Discussion settlement unavailable") from None
 
     def discussion_page(self, repo, number, after=None, comment_id=None):
         """Only these fixed queries are allowed; source text is never executable."""
@@ -156,7 +179,7 @@ def discussion_activity(api, repo, number, cap):
         if why:
             gaps.append(why)
     normalized = [{"created_at": x.get("createdAt"), "deleted_at": x.get("deletedAt"),
-                   "body": x.get("body"),
+                   "body": x.get("body"), "id": x.get("databaseId"),
                    "user": {"login": x["author"].get("login"),
                             "type": x["author"].get("__typename")}
                    if isinstance(x.get("author"), dict) else None} for x in activity]
@@ -227,6 +250,60 @@ def waiting(events, selves):
     return bool(pending), pending
 
 
+def follow_up(raw, comments, kind, selves, complete, url):
+    """Post-settlement human activity, never a semantic actionability verdict."""
+    unknown = {"review_needed": None, "since": None, "url": None}
+    markers = []
+    if raw.get("state") == "closed":
+        markers.append(raw.get("closed_at"))
+    if kind == "discussion" and raw.get("answer_chosen_at") is not None:
+        markers.append(raw["answer_chosen_at"])
+    try:
+        boundary = max(utc(t) for t in markers)
+        events, gaps = activity_events(comments)
+        if not complete or gaps:
+            return unknown
+        # Parse every event before filtering, so missing times cannot hide activity.
+        later = [(t, who) for t, who in events if utc(t) > boundary]
+        needed, since = waiting(later, selves)
+        if needed is None:
+            return unknown
+        link = None
+        if needed:
+            candidate = next(c for c in comments if human(c.get("user"))
+                             and c["user"]["login"].casefold() not in selves
+                             and utc(c.get("created_at")) == utc(since))
+            identity = candidate.get("id")
+            anchor = "discussioncomment" if kind == "discussion" else "issuecomment"
+            link = url + (f"#{anchor}-{identity}" if type(identity) is int and identity > 0 else "")
+        return {"review_needed": needed, "since": since, "url": link}
+    except (ValueError, TypeError, StopIteration):
+        return unknown
+
+
+def validate_follow_up(row):
+    if "follow_up" not in row:
+        return
+    f = row["follow_up"]
+    if not isinstance(f, dict) or set(f) != {"review_needed", "since", "url"}:
+        raise ValueError("invalid follow-up observation")
+    if f["review_needed"] is not None and type(f["review_needed"]) is not bool:
+        raise ValueError("invalid follow-up state")
+    if row["kind"] not in {"issue", "discussion"} or not (row.get("closed") or row["answered"]):
+        raise ValueError("follow-up lacks settled thread")
+    if f["review_needed"] is True:
+        utc(f["since"])
+        anchor = "discussioncomment" if row["kind"] == "discussion" else "issuecomment"
+        if not isinstance(f["url"], str) or not re.fullmatch(re.escape(row["url"]) + rf"(#{anchor}-[1-9][0-9]*)?", f["url"]):
+            raise ValueError("invalid follow-up source")
+        if row["coverage"] != "complete" or row["awaiting_response"] is not True or row["waiting_since"] != f["since"]:
+            raise ValueError("inconsistent follow-up evidence")
+    elif f["since"] is not None or f["url"] is not None:
+        raise ValueError("inactive follow-up carries candidate")
+    if row["awaiting_response"] is not f["review_needed"]:
+        raise ValueError("inconsistent follow-up response")
+
+
 def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
     number = raw.get("number")
     if not isinstance(number, int) or isinstance(number, bool) or number < 1:
@@ -265,10 +342,32 @@ def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
         gaps.append("activity timestamps unavailable or ordering ambiguous")
     category = (raw.get("category") or {}).get("name")
     answered = raw.get("answer_chosen_at") is not None
-    # Preserve the established hub policy; delivery follow-up is separate.
-    if kind == "discussion" and (answered or category in BROADCAST):
-        awaiting, since = False, None
-    if kind == "discussion" and (raw.get("state") == "closed" or raw.get("locked")):
+    observation = None
+    settled = raw.get("state") == "closed" or (kind == "discussion" and answered)
+    if kind != "pr" and settled and category not in BROADCAST:
+        # REST Discussions omit closed_at. Missing/unreadable GraphQL evidence
+        # must never turn a closed thread into a checked-clear observation.
+        if kind == "discussion" and raw.get("state") == "closed" and not raw.get("closed_at"):
+            try:
+                detail = api.discussion_state(repo, number)
+                graph_answer = detail.get("answerChosenAt")
+                rest_answer = raw.get("answer_chosen_at")
+                same_answer = ((graph_answer is None and rest_answer is None) or
+                               (graph_answer is not None and rest_answer is not None and
+                                utc(graph_answer) == utc(rest_answer)))
+                if not detail["closed"] or not same_answer:
+                    raise ReadError("Discussion settlement changed during collection")
+                raw = dict(raw, closed_at=detail.get("closedAt"))
+            except (AttributeError, KeyError, TypeError, ValueError, ReadError):
+                complete = False
+                gaps.append("Discussion settlement unavailable or changed during collection")
+        observation = follow_up(raw, comments, kind, selves, complete,
+                                f"https://github.com/{repo}/{path}/{number}")
+        awaiting, since = observation["review_needed"], observation["since"]
+        if awaiting is None:
+            complete = False
+            gaps.append("post-settlement activity or settlement time unknown")
+    elif kind == "discussion" and (category in BROADCAST or raw.get("locked")):
         awaiting, since = False, None
     if kind == "discussion" and deliveries is not None:
         from .followthrough import derive
@@ -287,7 +386,20 @@ def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
         "coverage": "complete" if complete and awaiting is not None else "partial",
         "gaps": gaps, "cached": False,
         "feedback_report": "<!-- feedback-report: v1 -->" in (raw.get("body") or ""),
+        **({"follow_up": observation} if observation is not None else {}),
     }
+
+
+def quiet_closed_issue(entry):
+    """Avoid rereading historical comment threads with no post-closure update."""
+    if entry.get("state") != "closed" or "pull_request" in entry:
+        return False
+    if type(entry.get("comments")) is int and entry["comments"] == 0:
+        return True
+    try:
+        return utc(entry.get("updated_at")) == utc(entry.get("closed_at"))
+    except (ValueError, TypeError):
+        return False
 
 
 def collect(api, repo_homes, config, pending=None):
@@ -318,14 +430,17 @@ def collect(api, repo_homes, config, pending=None):
             entries, complete, why = pages(api, f"repos/{repo}/{endpoint}?state=open", config["max_pages"])
             if why:
                 receipt["gaps"].append(f"{endpoint}: {why}")
-            if kind == "discussion":
-                closed, _, gap = pages(api, f"repos/{repo}/discussions?state=closed", config["max_pages"])
-                entries.extend(closed)
-                entries = list({e.get("number"): e for e in entries}.values())
-                if gap:
-                    receipt["gaps"].append(f"closed discussions: {gap}")
+            # Recent activity, not creation time, determines the bounded sweep.
+            closed_endpoint = f"repos/{repo}/{endpoint}?state=closed&sort=updated&direction=desc"
+            closed, _, gap = pages(api, closed_endpoint, config["max_pages"])
+            entries.extend(e for e in closed if kind == "discussion" or "pull_request" not in e)
+            entries = list({e.get("number"): e for e in entries}.values())
+            if gap:
+                receipt["gaps"].append(f"closed {endpoint}: {gap}")
             for entry in entries:
-                if kind != "discussion" and (entry.get("state", "open") != "open" or entry.get("locked")):
+                if kind == "issue" and quiet_closed_issue(entry):
+                    continue
+                if kind != "discussion" and "pull_request" in entry and (entry.get("state", "open") != "open" or entry.get("locked")):
                     continue
                 item_kind = "pr" if "pull_request" in entry else kind
                 is_human = human(entry.get("user"))
@@ -335,7 +450,7 @@ def collect(api, repo_homes, config, pending=None):
                 if known_bot and item_kind != "pr":
                     continue
                 external = is_human and entry["user"]["login"].casefold() not in selves
-                if item_kind == "issue" and is_human and not external:
+                if item_kind == "issue" and is_human and not external and entry.get("state") != "closed":
                     continue
                 try:
                     row = conversation(api, repo, entry, item_kind, config, deliveries, pending)
@@ -348,6 +463,9 @@ def collect(api, repo_homes, config, pending=None):
                 # review coverage stays visible rather than silently dropping it.
                 if item_kind == "pr" and not external and not row["review_requested"] \
                         and row["coverage"] == "complete":
+                    continue
+                # Quiet closed issues add no queue value; keep unknowns visible.
+                if item_kind == "issue" and row.get("closed") and row["awaiting_response"] is False:
                     continue
                 source_rows.append(row)
         receipt["status"] = "partial" if receipt["gaps"] else "complete"
@@ -388,7 +506,7 @@ def validate(snapshot):
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("invalid conversation")
-        if set(row) - {"closed"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
+        if set(row) - {"closed", "follow_up"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
                         "awaiting_response", "waiting_since", "review_requested", "coverage", "gaps", "cached", "feedback_report"}:
             raise ValueError("unknown conversation fields; raw content must not be published")
         if "closed" in row and type(row["closed"]) is not bool:
@@ -405,6 +523,7 @@ def validate(snapshot):
         if row.get("id") != identity or row.get("url") != f"https://github.com/{identity}" or identity in ids:
             raise ValueError("invalid or duplicate conversation identity/link")
         ids.add(identity)
+        validate_follow_up(row)
         if row.get("awaiting_response") is not None and type(row["awaiting_response"]) is not bool:
             raise ValueError("invalid awaiting-response state")
         if row.get("waiting_since"):

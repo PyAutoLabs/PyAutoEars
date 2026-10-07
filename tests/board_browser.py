@@ -9,6 +9,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 from test_ears import BRAIN, CONFIG, STAMP, board, fixture
 from test_followthrough import delivery_snapshot
+from test_closed_followups import candidate_snapshot
 
 
 def main():
@@ -26,6 +27,14 @@ def main():
     snapshot['conversations'][0]['title'] = 'Help configuring multi-band galaxy models'
     snapshot['conversations'][0]['waiting_since'] = (stamp - timedelta(days=3)).isoformat()
     snapshot['conversations'][1]['title'] = 'Add a tutorial for the new fitting workflow'
+    followup = candidate_snapshot()['conversations'][0]
+    followup.update(number=13, id='example/hub/discussions/13',
+                    url='https://github.com/example/hub/discussions/13',
+                    title='New request on a closed discussion',
+                    waiting_since=(stamp - timedelta(days=1)).isoformat())
+    followup['follow_up'].update(since=followup['waiting_since'],
+                                url=followup['url'] + '#discussioncomment-42')
+    snapshot['conversations'].append(followup)
     for name, value in board.render(snapshot, CONFIG, BRAIN).items():
         (output / name).write_text(value)
     server = http.server.ThreadingHTTPServer(
@@ -46,6 +55,11 @@ def main():
                     page.emulate_media(color_scheme=scheme)
                     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth"), (width, scheme)
                     page.screenshot(path=str(output / f"synthetic-{width}-{scheme}.png"), full_page=True)
+            followup_topic = page.locator('#attention .topic').filter(has_text='New request on a closed discussion')
+            followup_topic.locator(':scope > summary').click()
+            assert 'Closed · Answered' in followup_topic.inner_text()
+            assert 'permission' in followup_topic.inner_text()
+            assert followup_topic.get_by_role('link', name='Read follow-up').get_attribute('href').endswith('#discussioncomment-42')
             assert not page.locator('#freshness').is_visible()
             assert page.locator('.orchestration-links a').count() == 2
             update = page.locator('.orchestration-panel [data-refresh-link]')

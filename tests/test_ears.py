@@ -116,7 +116,7 @@ def test_response_age_is_not_generic_updated_at():
     assert row["waiting_since"] == "2026-10-02T01:00:00+00:00"
 
 
-@pytest.mark.parametrize("category,answer,expected", [("Help & Questions", None, None), ("Ideas & Proposals", STAMP, False), ("Show and tell", None, False)])
+@pytest.mark.parametrize("category,answer,expected", [("Help & Questions", None, None), ("Ideas & Proposals", STAMP, None), ("Show and tell", None, False)])
 def test_discussion_policy_and_unverified_nested_replies(category, answer, expected):
     api = API({listing("example/hub", "discussions"): [thread(category={"name": category}, answer_chosen_at=answer)]})
     row = collect.collect(api, [], CONFIG)["conversations"][0]

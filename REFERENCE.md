@@ -44,8 +44,8 @@ requested review too; bot messages do not create a human response obligation.
 
 Response timing uses the earliest external message after the last maintainer
 message, including PR review comments and submitted reviews. A reply is not
-proof of resolution. Missing timestamps/order mean unknown. Accepted answers
-and broadcast categories preserve the existing hub settlement semantics.
+proof of resolution. Missing timestamps/order mean unknown. Accepted answers settle earlier activity; later external comments require follow-up review.
+Broadcast categories retain their existing non-response semantics.
 Discussion activity uses fixed read-only GraphQL queries for the complete
 top-level comment connection and each comment's reply connection. Every
 connection follows `pageInfo` cursors independently up to `max_pages`; a
@@ -60,9 +60,8 @@ read is distinct from a successful empty read. REST PR review comments include
 inline replies; submitted reviews and issue comments are separately paginated.
 This measures response activity, not review-thread resolution or delivery.
 An accepted proposal settles the hub response obligation only; implementation
-and release evidence belong to the separate follow-through projection. Accepted-answer
-and broadcast policy can settle response obligation even while a coverage gap
-remains visible.
+and release evidence belong to the separate follow-through projection. Broadcast policy can settle response obligation while a coverage gap remains visible.
+Settled non-broadcast threads with incomplete follow-up evidence stay unknown.
 
 The CLI returns 2 for invalid configuration, input or render failure. Source
 read failures appear in a valid degraded snapshot so the dashboard can expose
@@ -119,7 +118,8 @@ agent session is created. The workflow is ordinary repository automation.
 (publicly verified URL/repo/kind triples) and bounded `gaps`. No source bodies
 or manual task assignments are stored. Old snapshots without the extension
 remain valid. Conversations may carry boolean `closed`; closed Discussions
-are collected separately, remain settled, and do not count as open in Brain.
+are collected separately and do not count as open in Brain; new external activity
+after settlement can require follow-up review independently of delivery status.
 
 A configured maintainer records explicit links on their own source body or
 comment/reply, one unquoted standalone line per link:
@@ -204,3 +204,31 @@ URL mentions do not qualify. This means a plan exists, not that it is approved
 or implemented. This hint is render-time only: snapshot v1, delivery states and
 Brain's cockpit feed remain unchanged. Rendering a snapshot without `--mind`
 keeps source/delivery badges and makes no plan claim.
+
+## Post-settlement activity (optional snapshot v1 extension)
+
+A settled non-broadcast Discussion or closed issue carries `follow_up` with
+nullable boolean `review_needed`, nullable timestamp `since`, and nullable `url`.
+True means an external human comment after the latest closure/answer boundary
+and after the last maintainer response needs review. It does not assert semantic
+actionability: even thanks can need contextual inspection. The timestamp is the
+oldest pending comment, and the URL links to that comment when an identity is
+available, otherwise the thread. False/null carry no timestamp or URL. Response
+state mirrors this observation; unknown activity or settlement time is partial,
+never checked clear. Discussion closure time comes from a fixed read-only
+GraphQL query because REST does not supply it. No permissions or bodies are
+published. Readers accept old snapshots without this optional field.
+
+Closed issues and Discussions are scanned by most recently updated first, under
+`max_pages`; truncated history is an explicit coverage gap. Closed PRs are not
+read. Closed maintainer-authored issues are checked for external comments too;
+quiet closed issues are omitted. New activity can bring an old thread into the
+bounded window. This is not an unlimited historical audit.
+
+Brain Community reviews the source comments and nested replies for requests,
+acknowledgements or ambiguity and recommends the next step. A contributor's
+ability to reopen is never a prerequisite. Where a reopen is appropriate, verify
+the acting account's permission or refer it to a maintainer; never infer the
+commenter's permissions from the collector token. Reopening, unlocking and
+clearing an answer are separate, explicitly authorized actions. Ears performs
+none of them. Stale/cached evidence must be refreshed before acting.

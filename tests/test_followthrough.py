@@ -105,13 +105,13 @@ def test_untrusted_actor_and_private_link_not_followed_or_exported():
 
 def delivery_snapshot():
     a = api_fixture()
-    raw = thread(1, state='closed', answer_chosen_at=STAMP, category={'name': 'Ideas & Proposals'})
+    raw = thread(1, state='closed', closed_at=STAMP, answer_chosen_at=STAMP, category={'name': 'Ideas & Proposals'})
     api = DiscussionAPI({
         (None, None): connection([node('c1', body='PRIVATE RAW TEXT')]),
         ('c1', None): connection([node('r1', 'Maintainer', stamp='2026-10-03T13:00:00Z', body='Delivery-issue: ' + I)]),
     }, overrides={**a.overrides,
                   'repos/example/hub/discussions?state=open&per_page=100&page=1': [],
-                  'repos/example/hub/discussions?state=closed&per_page=100&page=1': [raw]})
+                  'repos/example/hub/discussions?state=closed&sort=updated&direction=desc&per_page=100&page=1': [raw]})
     snap = collect.collect(api, [], CONFIG, set())
     return snap
 

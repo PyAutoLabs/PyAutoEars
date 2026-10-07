@@ -9,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .collect import line, now, utc, validate
-from .presentation import CHECKIN, CSS, copy_button, pill, progress, waiting_label
+from .presentation import CHECKIN, CSS, copy_button, pill, progress, waiting_label, triage_prompt
 
 
 def load_module(path, name):
@@ -56,7 +56,7 @@ def render(snapshot, config, brain, rendered_at=None, plans=()):
         headline = "STALE — " + headline
     items = []
     for row in attention + [r for r in unknown if r not in attention]:
-        prompt = theme.portable_prompt(f"/community triage {row['url']}")
+        prompt = theme.portable_prompt(triage_prompt(row))
         items.append({"id": row["id"], "severity": "yellow", "text": line(row["title"]),
                       "url": row["url"], "prompt": prompt,
                       "state": "unknown" if row in unknown else "action_required",
@@ -133,8 +133,16 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
             label, tone = progress(row, d, stale, plans)
             timing = waiting_label(row, snapshot['generated'])
             kind = {'issue': 'Issue', 'pr': 'PR', 'discussion': 'Discussion'}[row['kind']]
-            prompt = theme.portable_prompt(f"/community triage {row['url']}")
+            prompt = theme.portable_prompt(triage_prompt(row))
             details = '<p><a href="' + esc(row['url'], quote=True) + '">Open ' + kind.lower() + ' ↗</a></p>'
+            if 'follow_up' in row:
+                settled = 'Closed' if row.get('closed') else 'Open'
+                settled += ' · Answered' if row['answered'] else ''
+                details += '<p>Thread status: ' + settled + '</p>'
+                candidate = row['follow_up'].get('url')
+                if candidate:
+                    details += '<p><a href="' + esc(candidate, quote=True) + '">Read follow-up ↗</a></p>'
+                details += '<p>Activity needs review; this is not a decision to reopen. Contributors may lack reopening permission.</p>'
             if row.get('waiting_since'):
                 details += '<p>Waiting since <time datetime="' + esc(row['waiting_since'], quote=True) + '">' + esc(utc(row['waiting_since']).strftime('%d %b %Y, %H:%M UTC')) + '</time></p>'
             if stale:

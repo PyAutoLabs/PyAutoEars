@@ -129,7 +129,7 @@ def test_closed_discussion_nested_links_live_collection_no_body_export():
     old = copy.deepcopy(snap)
     old.pop('follow_through')
     collect.validate(old)
-    assert 'No delivery evidence' in board.render(old, CONFIG, BRAIN)['index.html']
+    assert 'id="activity"' in board.render(old, CONFIG, BRAIN)['index.html']
     snap['follow_through'][0]['evidence'][0]['url'] = 'javascript:alert(1)'
     with pytest.raises(ValueError): collect.validate(snap)
 

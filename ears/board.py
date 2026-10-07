@@ -90,15 +90,10 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
     esc = html.escape
     rows = snapshot['conversations']
     linked = {d['discussion']: d for d in delivery}
-    owed = sum(d['update_owed'] is True for d in delivery)
-    unlinked = sum(d['state'] == 'unknown' for d in delivery)
     gaps = sum(r['status'] not in {'complete', 'excluded'} for r in receipts)
     navigation = [
         {"href": "#attention", "label": "Need attention", "count": len(attention)},
-        {"href": "#unknown", "label": "Response unknown", "count": len(unknown)},
         {"href": "#coverage", "label": "Source gaps", "count": gaps},
-        {"href": "#follow-through", "label": "Updates owed", "count": owed},
-        {"href": "#follow-through", "label": "Delivery unknown", "count": unlinked},
         {"href": "#activity", "label": "Recent activity"},
     ]
     body = [theme.hero('ears', 'Community board', navigation=navigation)]
@@ -106,21 +101,15 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
                 '>These figures may be out of date. Use the community check-in below to update them.</p>')
     work_links = [{"label": "Open Community Hub ↗",
                    "href": "https://github.com/orgs/PyAutoLabs/discussions"}]
-    repositories = [config["repo"], *(r["repo"] for r in receipts if r.get("public_verified") is True)]
-    for repository in dict.fromkeys(repositories):
-        if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
-            work_links.append({"label": repository, "href": "https://github.com/" + repository})
+    repository = config["repo"]
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        work_links.append({"label": repository, "href": "https://github.com/" + repository})
     checkin = theme.portable_prompt(CHECKIN)
     body.append(theme.orchestration_panel("ears", "", "", CHECKIN,
                 work_links=work_links, copy_label="Copy community check-in", organ="ears"))
     md = ['# PyAutoEars', '', headline, '', '## Community check-in', '', '```text', checkin, '```', '']
 
     def section(title, key, selected, empty):
-        if key == 'unknown' and not selected:
-            body.append('<section id="unknown"><details class="follow-summary"><summary>Unknown response state ' +
-                        pill('0 additional') + '</summary><p>' + esc(empty) + '</p></details></section>')
-            md.extend(['## ' + title, '', empty, ''])
-            return
         body.append(f'<section id="{key}"><div class="section-head"><h2>{esc(title)} '
                     f'<span class="section-count">{len(selected)}</span></h2></div>')
         md.extend(['## ' + title, '', '| Topic | Repository | Author | Type | Progress | Response |',
@@ -180,18 +169,8 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
 
     section('Needs your attention', 'attention', attention,
             'No attention items found in the observed data. Check coverage before concluding nobody is waiting.')
-    section('Unknown response state', 'unknown', [r for r in unknown if r not in attention],
-            'No additional unknown conversations. Any gaps on attention items appear in their details.')
-    section('Community activity', 'activity', [r for r in rows if r not in attention and r not in unknown],
+    section('Community activity', 'activity', [r for r in rows if r not in attention],
             'No additional conversations in the observed data.')
-    body.append('<section id="follow-through"><details class="follow-summary"><summary>Following through ' +
-                pill(f'{owed} updates owed' if not stale else 'Refresh needed', 'purple' if not stale else 'neutral') +
-                pill(f'{unlinked} delivery unknown') + '</summary>'
-                )
-    md.extend(['## Following through', '', f'{owed} observed updates owed; {unlinked} delivery unknown.', ''])
-    if not delivery:
-        body.append('<p>No delivery evidence in this snapshot.</p>')
-    body.append('</details></section>')
     body.append('<details><summary>Recurring feedback</summary><p>Planned: evidence-backed themes across independent reports. No themes have been inferred by this collector.</p></details>')
     body.append('<p id="copy-status" role="status" aria-live="polite"></p><pre id="copy-fallback" tabindex="-1" hidden></pre>')
     body.append('<section id="coverage"><h2>Listening coverage</h2><div class="table-wrap" role="region" aria-label="Listening coverage" tabindex="0">'
@@ -221,8 +200,6 @@ function checkFreshness() {
     document.getElementById('freshness').hidden = false;
     document.querySelectorAll('.community .badge').forEach(b => {b.textContent = 'Refresh needed'; b.className = 'badge neutral'});
     document.querySelectorAll('.owed-note').forEach(n => n.hidden = true);
-    const follow = document.querySelector('#follow-through .badge');
-    follow.textContent = 'Refresh needed'; follow.className = 'badge neutral';
   }
 }
 checkFreshness();

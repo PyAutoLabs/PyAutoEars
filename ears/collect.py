@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 BROADCAST = {"Announcements", "Show and tell"}
+FOLLOW_UP_WINDOW = timedelta(days=30)
 DISCUSSION_COMMENTS = """query($owner:String!, $name:String!, $number:Int!, $after:String) {
   repository(owner:$owner, name:$name) { discussion(number:$number) {
     comments(first:100, after:$after) {
@@ -312,7 +313,7 @@ def validate_follow_up(row):
         raise ValueError("inconsistent follow-up response")
 
 
-def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
+def conversation(api, repo, raw, kind, config, deliveries=None, pending=None, observed_at=None):
     number = raw.get("number")
     if not isinstance(number, int) or isinstance(number, bool) or number < 1:
         raise ReadError("invalid conversation number")
@@ -351,6 +352,7 @@ def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
     category = (raw.get("category") or {}).get("name")
     answered = raw.get("answer_chosen_at") is not None
     observation = None
+    historical_follow_up_at = None
     settled = raw.get("state") == "closed" or (kind == "discussion" and answered)
     if kind != "pr" and settled and category not in BROADCAST:
         # REST Discussions omit closed_at. Missing/unreadable GraphQL evidence
@@ -372,6 +374,16 @@ def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
         observation = follow_up(raw, comments, kind, selves, complete,
                                 f"https://github.com/{repo}/{path}/{number}")
         awaiting, since = observation["review_needed"], observation["since"]
+        if awaiting is True:
+            # Only complete evidence reaches here. A fresh external reply renews
+            # attention even when the oldest pending comment is years old.
+            comment_events, _ = activity_events(comments)
+            latest = max(utc(t) for t, who in comment_events
+                         if who.casefold() not in selves and utc(t) >= utc(since))
+            if utc(observed_at or now()) - latest > FOLLOW_UP_WINDOW:
+                historical_follow_up_at = latest.isoformat()
+                awaiting, since = False, None
+                observation = {"review_needed": False, "since": None, "url": None}
         if awaiting is None:
             complete = False
             gaps.append("post-settlement activity or settlement time unknown")
@@ -397,6 +409,7 @@ def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
         "gaps": gaps, "cached": False,
         "feedback_report": "<!-- feedback-report: v1 -->" in (raw.get("body") or ""),
         **({"follow_up": observation} if observation is not None else {}),
+        **({"historical_follow_up_at": historical_follow_up_at} if historical_follow_up_at else {}),
     }
 
 
@@ -463,7 +476,8 @@ def collect(api, repo_homes, config, pending=None):
                 if item_kind == "issue" and is_human and not external and entry.get("state") != "closed":
                     continue
                 try:
-                    row = conversation(api, repo, entry, item_kind, config, deliveries, pending)
+                    row = conversation(api, repo, entry, item_kind, config, deliveries, pending,
+                                       observed_at=stamp)
                 except ReadError as exc:
                     receipt["gaps"].append(str(exc))
                     continue
@@ -475,7 +489,8 @@ def collect(api, repo_homes, config, pending=None):
                         and row["coverage"] == "complete":
                     continue
                 # Quiet closed issues add no queue value; keep unknowns visible.
-                if item_kind == "issue" and row.get("closed") and row["awaiting_response"] is False:
+                if item_kind == "issue" and row.get("closed") and row["awaiting_response"] is False \
+                        and not row.get("historical_follow_up_at"):
                     continue
                 source_rows.append(row)
         receipt["status"] = "partial" if receipt["gaps"] else "complete"
@@ -516,7 +531,7 @@ def validate(snapshot):
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("invalid conversation")
-        if set(row) - {"closed", "follow_up", "created_at", "updated_at"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
+        if set(row) - {"closed", "follow_up", "created_at", "updated_at", "historical_follow_up_at"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
                         "awaiting_response", "waiting_since", "review_requested", "coverage", "gaps", "cached", "feedback_report"}:
             raise ValueError("unknown conversation fields; raw content must not be published")
         if "closed" in row and type(row["closed"]) is not bool:
@@ -534,6 +549,12 @@ def validate(snapshot):
             raise ValueError("invalid or duplicate conversation identity/link")
         ids.add(identity)
         validate_follow_up(row)
+        if "historical_follow_up_at" in row:
+            historical = utc(row["historical_follow_up_at"])
+            if row.get("follow_up") != {"review_needed": False, "since": None, "url": None} \
+                    or row.get("coverage") != "complete" or row.get("waiting_since") is not None \
+                    or utc(snapshot["generated"]) - historical <= FOLLOW_UP_WINDOW:
+                raise ValueError("invalid historical follow-up evidence")
         if row.get("awaiting_response") is not None and type(row["awaiting_response"]) is not bool:
             raise ValueError("invalid awaiting-response state")
         if row.get("waiting_since"):

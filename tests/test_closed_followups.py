@@ -1,6 +1,8 @@
 """New requests must be visible without requiring a contributor to reopen."""
 import copy
 import json
+from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -10,6 +12,11 @@ from ears import collect, board
 
 CLOSED = '2026-10-02T00:00:00Z'
 LATER = '2026-10-03T00:00:00Z'
+
+
+@pytest.fixture(autouse=True)
+def fixed_collection_time(monkeypatch):
+    monkeypatch.setattr(collect, 'now', lambda: STAMP)
 
 
 def settled(**kwargs):
@@ -106,9 +113,104 @@ def test_truncated_closed_issue_scan_retains_candidates_and_reports_gap():
 
 def candidate_snapshot():
     api = DiscussionAPI({(None, None): connection([node('new', stamp=LATER, databaseId=18676930)])}, raw=settled())
-    s = collect.collect(api, [], CONFIG)
-    s['generated'] = STAMP
+    with patch('ears.collect.now', return_value=STAMP):
+        s = collect.collect(api, [], CONFIG)
     return s
+
+
+def historical_snapshot(kind='issue', latest='2020-02-02T00:00:00Z', extra=()):
+    raw = thread(state='closed', created_at='2020-01-01T00:00:00Z',
+                 closed_at='2020-02-01T00:00:00Z', updated_at=STAMP)
+    if kind != 'issue':
+        raw.update(answer_chosen_at=raw['closed_at'], category={'name': 'Help & Questions'})
+        if kind == 'answered':
+            raw['state'] = 'open'
+        api = DiscussionAPI({(None, None): connection([
+            node('old', stamp='2020-02-02T00:00:00Z'),
+            node('latest', stamp=latest), *extra])}, raw=raw)
+    else:
+        api = API({closed_listing(): [raw], comments(): [
+            {'id': 41, 'user': user('Reporter'), 'created_at': '2020-02-02T00:00:00Z'},
+            {'id': 42, 'user': user('Reporter'), 'created_at': latest}, *extra]})
+    with patch('ears.collect.now', return_value=STAMP):
+        snapshot = collect.collect(api, ['example/lib'] if kind == 'issue' else [], CONFIG)
+    collect.validate(snapshot)
+    return snapshot
+
+
+@pytest.mark.parametrize('kind', ['issue', 'discussion', 'answered'])
+@pytest.mark.parametrize('seconds_old,historical', [(30 * 86400 + 1, True), (30 * 86400, False), (29 * 86400, False)])
+def test_cutoff_uses_latest_external_followup_not_oldest_pending_or_thread_update(kind, seconds_old, historical):
+    latest = (collect.utc(STAMP) - timedelta(seconds=seconds_old)).isoformat()
+    s = historical_snapshot(kind, latest)
+    row = s['conversations'][0]
+    assert row['awaiting_response'] is not historical
+    assert row['follow_up']['review_needed'] is not historical
+    if historical:
+        assert row['historical_follow_up_at'] == latest
+        assert row['waiting_since'] is None
+        assert row['follow_up'] == {'review_needed': False, 'since': None, 'url': None}
+    else:
+        assert 'historical_follow_up_at' not in row
+        assert row['waiting_since'] == '2020-02-02T00:00:00+00:00'
+
+
+def test_historical_followup_stays_in_activity_and_out_of_feed_attention():
+    s = historical_snapshot()
+    result = board.render(s, CONFIG, BRAIN, STAMP)
+    attention, activity = result['index.html'].split('id="activity"', 1)
+    assert '<details class="topic">' not in attention
+    assert 'Historical follow-up' in activity
+    assert 'Last external follow-up:' in activity
+    assert 'Activity needs review' not in activity
+    assert 'Historical follow-up' in result['dashboard.md']
+    state = json.loads(result['state.json'])
+    assert state['status'] == 'green'
+    assert not state['items']
+    adapter = board.load_module(BRAIN / 'agents/conductors/community/_ears_feed.py', 'ears_window_adapter')
+    adapted = adapter.adapt(s, state, CONFIG['self_logins'], 'example', CONFIG['hub'], current=collect.utc(STAMP))
+    assert adapted['counts']['awaiting_response'] == 0
+
+
+def test_new_reply_reactivates_history_and_bots_do_not():
+    bot = {'user': {'login': 'robot[bot]', 'type': 'Bot'}, 'created_at': STAMP}
+    assert historical_snapshot(extra=[bot])['conversations'][0]['historical_follow_up_at']
+    fresh = {'user': user('AnotherReporter'), 'created_at': STAMP}
+    row = historical_snapshot(extra=[fresh])['conversations'][0]
+    assert row['awaiting_response'] is True and 'historical_follow_up_at' not in row
+    maintainer = {'user': user('Maintainer'), 'created_at': STAMP}
+    assert historical_snapshot(extra=[maintainer])['conversations'] == []
+
+
+def test_old_open_issue_is_not_aged_out():
+    from test_ears import listing
+    s = collect.collect(API({listing(): [thread(created_at='2020-01-01T00:00:00Z')]}), ['example/lib'], CONFIG)
+    assert s['conversations'][0]['awaiting_response'] is True
+    assert 'historical_follow_up_at' not in s['conversations'][0]
+
+
+@pytest.mark.parametrize('extra', [
+    {'user': user('Reporter'), 'created_at': None},
+    {'user': None, 'created_at': STAMP},
+])
+def test_old_incomplete_activity_cannot_be_classified_as_historical(extra):
+    row = historical_snapshot(extra=[extra])['conversations'][0]
+    assert row['awaiting_response'] is None and row['coverage'] == 'partial'
+    assert 'historical_follow_up_at' not in row
+
+
+@pytest.mark.parametrize('mutation', [
+    lambda r: r.update(historical_follow_up_at=STAMP),
+    lambda r: r.update(historical_follow_up_at=None),
+    lambda r: r.update(coverage='partial'),
+    lambda r: r.update(waiting_since=LATER),
+    lambda r: r.pop('follow_up'),
+    lambda r: r.update(closed=False),
+])
+def test_historical_metadata_must_have_complete_expired_settled_evidence(mutation):
+    s = historical_snapshot(); mutation(s['conversations'][0])
+    with pytest.raises(ValueError):
+        collect.validate(s)
 
 
 def test_board_keeps_thread_status_and_permission_aware_review_visible():

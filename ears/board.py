@@ -151,7 +151,12 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
                 candidate = row['follow_up'].get('url')
                 if candidate:
                     details += '<p><a href="' + esc(candidate, quote=True) + '">Read follow-up ↗</a></p>'
-                details += '<p>Activity needs review; this is not a decision to reopen. Contributors may lack reopening permission.</p>'
+                historical = row.get('historical_follow_up_at')
+                if historical:
+                    details += '<p><strong>Last external follow-up:</strong> <time datetime="' + esc(historical, quote=True) + '">' + esc(utc(historical).strftime('%d %b %Y, %H:%M UTC')) + '</time></p>'
+                    details += '<p>Older than 30 days; kept here as history.</p>'
+                else:
+                    details += '<p>Activity needs review; this is not a decision to reopen. Contributors may lack reopening permission.</p>'
             if row.get('waiting_since'):
                 details += '<p><strong>Waiting since:</strong> <time datetime="' + esc(row['waiting_since'], quote=True) + '">' + esc(utc(row['waiting_since']).strftime('%d %b %Y, %H:%M UTC')) + '</time></p>'
             if stale:

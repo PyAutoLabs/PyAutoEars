@@ -9,7 +9,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 from test_ears import BRAIN, CONFIG, STAMP, board, fixture
 from test_followthrough import delivery_snapshot
-from test_closed_followups import candidate_snapshot
+from test_closed_followups import candidate_snapshot, historical_snapshot
 
 
 def main():
@@ -36,6 +36,11 @@ def main():
     followup['follow_up'].update(since=followup['waiting_since'],
                                 url=followup['url'] + '#discussioncomment-42')
     snapshot['conversations'].append(followup)
+    historical = historical_snapshot()['conversations'][0]
+    historical.update(number=7, id='example/lib/issues/7',
+                      url='https://github.com/example/lib/issues/7',
+                      title='Old follow-up on a closed issue')
+    snapshot['conversations'].append(historical)
     for name, value in board.render(snapshot, CONFIG, BRAIN).items():
         (output / name).write_text(value)
     server = http.server.ThreadingHTTPServer(
@@ -95,6 +100,13 @@ def main():
             assert "community" in copied and "https://github.com/example/lib/issues/1" in copied
             page.locator('.board-nav-card[href="#activity"]').click()
             page.wait_for_function("document.getElementById('activity').closest('details.board-section').open")
+            historical_topic = page.locator('#activity .topic').filter(has_text='Old follow-up on a closed issue')
+            assert historical_topic.count() == 1
+            assert page.locator('#attention .topic').filter(has_text='Old follow-up on a closed issue').count() == 0
+            assert 'Historical follow-up' in historical_topic.locator('xpath=ancestor::tr').inner_text()
+            historical_topic.locator(':scope > summary').click()
+            assert 'Older than 30 days' in historical_topic.inner_text()
+            assert 'Activity needs review' not in historical_topic.inner_text()
             page.locator('#activity .topic summary').first.click()
             follow = page.get_by_role("button", name="Copy follow-through prompt").first
             follow.click()

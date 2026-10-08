@@ -107,6 +107,8 @@ def progress(row, delivery, stale, plans):
 
 
 def waiting_label(row, observed):
+    if row.get('historical_follow_up_at'):
+        return 'Historical follow-up'
     if row.get('follow_up', {}).get('review_needed') is True:
         return 'Follow-up needs review'
     since = row.get('waiting_since')

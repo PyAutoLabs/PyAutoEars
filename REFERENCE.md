@@ -218,7 +218,8 @@ keeps source/delivery badges and makes no plan claim.
 A settled non-broadcast Discussion or closed issue carries `follow_up` with
 nullable boolean `review_needed`, nullable timestamp `since`, and nullable `url`.
 True means an external human comment after the latest closure/answer boundary
-and after the last maintainer response needs review. It does not assert semantic
+and after the last maintainer response needs review, with the latest such comment
+no more than 30 days before collection. It does not assert semantic
 actionability: even thanks can need contextual inspection. The timestamp is the
 oldest pending comment, and the URL links to that comment when an identity is
 available, otherwise the thread. False/null carry no timestamp or URL. Response
@@ -226,6 +227,21 @@ state mirrors this observation; unknown activity or settlement time is partial,
 never checked clear. Discussion closure time comes from a fixed read-only
 GraphQL query because REST does not supply it. No permissions or bodies are
 published. Readers accept old snapshots without this optional field.
+
+For complete observations, an unanswered post-settlement follow-up whose latest
+external human comment is **older than 30 days** moves out of Needs your attention
+and into Community activity as **Historical follow-up**. The optional top-level
+`historical_follow_up_at` records that latest comment timestamp; `follow_up` is
+inactive (`review_needed: false`, `since: null`, `url: null`), `awaiting_response`
+is false and `waiting_since` is null. This is an attention-window policy, not a
+claim that someone replied or resolved the request. Historical closed issues stay
+in the snapshot. The exact 30-day boundary remains recent. A new external human
+comment restores attention; bots and generic issue updates do not renew it.
+Ordinary open issues and unsettled Discussions have no age limit. Missing or
+incomplete activity remains unknown, never historical. Legacy snapshots retain
+their original observations until a new collection; render time does not change
+them. Brain accepts the additive historical timestamp and existing inactive
+follow-up shape, so its awaiting-response queue agrees with the Ears board.
 
 Closed issues and Discussions are scanned by most recently updated first, under
 `max_pages`; truncated history is an explicit coverage gap. Closed PRs are not

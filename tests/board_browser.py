@@ -79,7 +79,7 @@ def main():
             page.get_by_role('link', name='Open Community Hub').focus()
             assert page.get_by_role('link', name='Open Community Hub').evaluate('(e) => e === document.activeElement')
             page.locator('#orchestration-ears-direction').fill('Prioritize unanswered questions')
-            checkin = page.get_by_role('button', name='Copy community check-in')
+            checkin = page.get_by_role('button', name='Copy check-in prompt')
             checkin.click()
             page.wait_for_function("navigator.clipboard.readText().then(t => t.includes('Optional direction (user context):\\nPrioritize unanswered questions'))")
             assert '\n\nOptional direction (user context):' in page.evaluate('navigator.clipboard.readText()')

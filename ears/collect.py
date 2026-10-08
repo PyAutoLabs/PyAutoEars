@@ -46,6 +46,14 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def source_timestamp(value):
+    """Keep valid public source dates; absent or malformed metadata is unknown."""
+    try:
+        return utc(value).isoformat()
+    except (ValueError, TypeError):
+        return None
+
+
 def line(value):
     return " ".join(str(value or "").split())[:500]
 
@@ -381,6 +389,8 @@ def conversation(api, repo, raw, kind, config, deliveries=None, pending=None):
         "closed": raw.get("state") == "closed",
         "author": line((raw.get("user") or {}).get("login")),
         "category": line(category), "answered": answered,
+        "created_at": source_timestamp(raw.get("created_at")),
+        "updated_at": source_timestamp(raw.get("updated_at")),
         "awaiting_response": awaiting, "waiting_since": since,
         "review_requested": bool(selves.intersection(reviewers)),
         "coverage": "complete" if complete and awaiting is not None else "partial",
@@ -506,7 +516,7 @@ def validate(snapshot):
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("invalid conversation")
-        if set(row) - {"closed", "follow_up"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
+        if set(row) - {"closed", "follow_up", "created_at", "updated_at"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
                         "awaiting_response", "waiting_since", "review_requested", "coverage", "gaps", "cached", "feedback_report"}:
             raise ValueError("unknown conversation fields; raw content must not be published")
         if "closed" in row and type(row["closed"]) is not bool:
@@ -528,6 +538,9 @@ def validate(snapshot):
             raise ValueError("invalid awaiting-response state")
         if row.get("waiting_since"):
             utc(row["waiting_since"])
+        for key in ("created_at", "updated_at"):
+            if row.get(key) is not None:
+                utc(row[key])
         if row.get("coverage") not in {"complete", "partial"}:
             raise ValueError("invalid conversation coverage")
         for key in ("title", "author", "category"):

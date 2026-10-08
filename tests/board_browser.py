@@ -26,6 +26,7 @@ def main():
     # Use realistic public-metadata lengths without making live network reads.
     snapshot['conversations'][0]['title'] = 'Help configuring multi-band galaxy models'
     snapshot['conversations'][0]['waiting_since'] = (stamp - timedelta(days=3)).isoformat()
+    snapshot['conversations'][0]['updated_at'] = stamp.isoformat()
     snapshot['conversations'][1]['title'] = 'Add a tutorial for the new fitting workflow'
     followup = candidate_snapshot()['conversations'][0]
     followup.update(number=13, id='example/hub/discussions/13',
@@ -107,7 +108,15 @@ def main():
             assert page.evaluate('window.getSelection().toString()') == page.locator('#copy-fallback').inner_text()
             for width in (390, 1280):
                 page.set_viewport_size({'width': width, 'height': 900})
-                assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+                for scheme in ('light', 'dark'):
+                    page.emulate_media(color_scheme=scheme)
+                    assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+                    assert page.locator('#attention th', has_text='Updated').count() == 1
+                    assert page.locator('#activity th', has_text='Updated').count() == 1
+                    assert page.locator('.topic-meta').count() == 0
+                    assert page.get_by_text('Recurring feedback', exact=True).count() == 0
+                    assert page.locator('.topic-body strong', has_text='Delivery:').first.is_visible()
+                    page.screenshot(path=str(output / f'expanded-{width}-{scheme}.png'), full_page=True)
             # Re-opening an expired page must suppress current delivery claims.
             page.evaluate("Date.now = () => Date.parse(expires) + 1; window.dispatchEvent(new Event('pageshow'))")
             assert page.locator('#freshness').is_visible()

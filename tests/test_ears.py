@@ -61,6 +61,31 @@ def fixture():
     return s
 
 
+@pytest.mark.parametrize('kind', ['issue', 'pr', 'discussion'])
+def test_source_dates_are_normalized_independently_of_response_timing(kind):
+    raw = thread(created_at='2026-10-01T13:00:00+01:00', updated_at=STAMP)
+    if kind == 'pr':
+        raw['pull_request'] = {}
+    repo = 'example/hub' if kind == 'discussion' else 'example/lib'
+    endpoint = 'discussions' if kind == 'discussion' else 'issues'
+    snapshot = collect.collect(API({listing(repo, endpoint): [raw]}), ['example/lib'], CONFIG)
+    row = snapshot['conversations'][0]
+    assert row['kind'] == kind
+    assert row['created_at'] == '2026-10-01T12:00:00+00:00'
+    assert row['updated_at'] == '2026-10-03T12:00:00+00:00'
+    collect.validate(snapshot)
+    row['updated_at'] = '<script>bad date</script>'
+    with pytest.raises(ValueError):
+        collect.validate(snapshot)
+
+
+@pytest.mark.parametrize('value', [None, '', 'not a date', '2026-10-01T12:00:00', 42])
+def test_unusable_source_dates_are_unknown(value):
+    snapshot = collect.collect(API({listing(): [thread(updated_at=value)]}), ['example/lib'], CONFIG)
+    assert snapshot['conversations'][0]['updated_at'] is None
+    collect.validate(snapshot)
+
+
 def test_public_only_and_failed_metadata_never_leak_titles():
     api = API({"repos/private/lib": {"private": True},
                "repos/unknown/lib": collect.ReadError("read unavailable"),

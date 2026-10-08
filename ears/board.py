@@ -118,15 +118,17 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
     def section(title, key, selected, empty):
         body.append(f'<section id="{key}"><div class="section-head"><h2>{esc(title)} '
                     f'<span class="section-count">{len(selected)}</span></h2></div>')
-        md.extend(['## ' + title, '', '| Topic | Repository | Author | Type | Progress | Response |',
-                   '| --- | --- | --- | --- | --- | --- |'])
+        md.extend(['## ' + title, '', '| Topic | Repository | Author | Type | Updated | Progress | Response |',
+                   '| --- | --- | --- | --- | --- | --- | --- |'])
         if not selected:
             body.append(f'<p class="empty">{esc(empty)}</p></section>')
             md.extend([empty, ''])
             return
-        body.append(f'<div class="table-wrap" role="region" aria-label="{esc(title)}" tabindex="0">'
-                    '<table class="community"><thead><tr><th scope="col">Conversation / repository</th>'
-                    '<th scope="col">Author</th><th scope="col">Progress</th><th scope="col">Response</th>'
+        body.append('<p class="table-hint">Scroll the table to see all columns →</p>'
+                    f'<div class="table-wrap" role="region" aria-label="{esc(title)}" tabindex="0">'
+                    '<table class="community"><thead><tr><th scope="col">Conversation</th>'
+                    '<th scope="col">Author</th><th scope="col">Updated</th>'
+                    '<th scope="col">Progress</th><th scope="col">Response</th>'
                     '<th scope="col">Actions</th></tr></thead><tbody>')
         for row in selected:
             d = linked.get(row['url'])
@@ -134,31 +136,43 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
             timing = waiting_label(row, snapshot['generated'])
             kind = {'issue': 'Issue', 'pr': 'PR', 'discussion': 'Discussion'}[row['kind']]
             prompt = theme.portable_prompt(triage_prompt(row))
-            details = '<p><a href="' + esc(row['url'], quote=True) + '">Open ' + kind.lower() + ' ↗</a></p>'
+            timestamp = row.get('updated_at') or row.get('created_at')
+            date = utc(timestamp).strftime('%d %b %Y') if timestamp else 'Unavailable'
+            date_html = ('<time datetime="' + esc(timestamp, quote=True) + '">' + date + '</time>'
+                         if timestamp else date)
+            if timestamp and not row.get('updated_at'):
+                date += ' (created)'
+                date_html += ' (created)'
+            details = ''
             if 'follow_up' in row:
                 settled = 'Closed' if row.get('closed') else 'Open'
                 settled += ' · Answered' if row['answered'] else ''
-                details += '<p>Thread status: ' + settled + '</p>'
+                details += '<p><strong>Thread status:</strong> ' + settled + '</p>'
                 candidate = row['follow_up'].get('url')
                 if candidate:
                     details += '<p><a href="' + esc(candidate, quote=True) + '">Read follow-up ↗</a></p>'
                 details += '<p>Activity needs review; this is not a decision to reopen. Contributors may lack reopening permission.</p>'
             if row.get('waiting_since'):
-                details += '<p>Waiting since <time datetime="' + esc(row['waiting_since'], quote=True) + '">' + esc(utc(row['waiting_since']).strftime('%d %b %Y, %H:%M UTC')) + '</time></p>'
+                details += '<p><strong>Waiting since:</strong> <time datetime="' + esc(row['waiting_since'], quote=True) + '">' + esc(utc(row['waiting_since']).strftime('%d %b %Y, %H:%M UTC')) + '</time></p>'
             if stale:
                 details += '<p>Response and progress observations are stale. Refresh before acting.</p>'
             if row['category']:
-                details += '<p>Category: ' + esc(row['category']) + '</p>'
+                details += '<p><strong>Category:</strong> ' + esc(row['category']) + '</p>'
             if row['feedback_report']:
-                details += '<p>Feedback report (format marker only)</p>'
-            for gap in row['gaps']:
-                details += '<p>' + esc(line(gap)) + '</p>'
+                details += '<p><strong>Feedback report:</strong> format marker only</p>'
+            if row['gaps']:
+                details += '<p><strong>Source gaps:</strong></p><ul>' + ''.join(
+                    '<li>' + esc(line(gap)) + '</li>' for gap in row['gaps']) + '</ul>'
             if d:
-                details += '<p>Delivery: ' + esc('unknown (stale observation)' if stale else d['state'].replace('_', ' ')) + '</p>'
-                for evidence in d['evidence']:
-                    details += '<p><a href="' + esc(evidence['url'], quote=True) + '">' + esc(evidence['kind'] + ': ' + evidence['url']) + '</a></p>'
-                for gap in d['gaps']:
-                    details += '<p>' + esc(line(gap)) + '</p>'
+                details += '<p><strong>Delivery:</strong> ' + esc('unknown (stale observation)' if stale else d['state'].replace('_', ' ')) + '</p>'
+                if d['evidence']:
+                    details += '<p><strong>Delivery evidence:</strong></p><ul>' + ''.join(
+                        '<li><a href="' + esc(evidence['url'], quote=True) + '">' +
+                        esc(evidence['kind'] + ': ' + evidence['url']) + '</a></li>'
+                        for evidence in d['evidence']) + '</ul>'
+                if d['gaps']:
+                    details += '<p><strong>Evidence gaps:</strong></p><ul>' + ''.join(
+                        '<li>' + esc(line(gap)) + '</li>' for gap in d['gaps']) + '</ul>'
                 follow = theme.portable_prompt('/community triage ' + row['url'] + ' — verify linked delivery evidence and draft a contributor update for approval; do not post')
                 details += copy_button(follow, 'Copy follow-through prompt')
             details += '<details><summary>Triage prompt</summary><pre>' + esc(prompt) + '</pre></details>'
@@ -168,15 +182,15 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
             if label == 'Plan recorded':
                 details += '<p>An issued Mind record explicitly links this issue and contains a plan.</p>'
             body.append('<tr><td><details class="topic"><summary>' + esc(row['title']) +
-                        '<span class="topic-meta">' + esc(row['repo']) + ' · ' + kind + ' #' + str(row['number']) +
-                        '</span></summary><div class="topic-body">' + details + '</div></details></td><td>' + author_html +
+                        '</summary><div class="topic-body">' + details + '</div></details></td><td>' + author_html +
+                        '</td><td class="conversation-date">' + date_html +
                         '</td><td>' + pill(label, tone) + note + '</td><td>' + esc(timing) +
                         ('<span class="small-note">At last observation</span>' if stale else '') +
                         '</td><td><div class="row-actions">' + copy_button(prompt, 'Copy triage prompt') +
                         '<a class="source-action" aria-label="Open conversation on GitHub" title="Open conversation on GitHub" href="' +
                         esc(row['url'], quote=True) + '">↗</a></div></td></tr>')
             md_title = row["title"].replace("[", "&#91;").replace("]", "&#93;")
-            values = [f"[{md_title}]({row['url']})", row['repo'], row['author'] or 'Unavailable', kind, label, timing]
+            values = [f"[{md_title}]({row['url']})", row['repo'], row['author'] or 'Unavailable', kind, date, label, timing]
             md.append('| ' + ' | '.join(esc(v).replace('|', '&#124;').replace('\n', ' ') for v in values) + ' |')
         body.append('</tbody></table></div></section>')
         md.append('')
@@ -185,7 +199,6 @@ def render_page(snapshot, theme, headline, stale, fresh_until, attention, unknow
             'No attention items found in the observed data. Check coverage before concluding nobody is waiting.')
     section('Community activity', 'activity', [r for r in rows if r not in attention],
             'No additional conversations in the observed data.')
-    body.append('<details><summary>Recurring feedback</summary><p>Planned: evidence-backed themes across independent reports. No themes have been inferred by this collector.</p></details>')
     body.append('<p id="copy-status" role="status" aria-live="polite"></p><pre id="copy-fallback" tabindex="-1" hidden></pre>')
     body.append('<section id="coverage"><h2>Listening coverage</h2><div class="table-wrap" role="region" aria-label="Listening coverage" tabindex="0">'
                 '<table class="coverage"><thead><tr><th scope="col">Repository</th><th scope="col">Coverage</th>'

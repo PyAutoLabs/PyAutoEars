@@ -26,6 +26,14 @@ flag, nullable `awaiting_response`, nullable UTC `waiting_since`, boolean
 format flag. `null` is unknown, never false. This is a read contract, not a
 second task registry. No runtime task assignments or opinions are persisted.
 
+Optional nullable `created_at` and `updated_at` fields retain source timestamps,
+normalized to UTC. Missing or malformed source dates become null; older snapshots
+may omit these fields. Both conversation tables show Updated, with an explicitly
+labelled creation-date fallback or Unavailable. These dates never substitute for
+response timing (`waiting_since`) or the snapshot's observation time. Brain's
+Community adapter accepts these additive metadata fields without changing its
+response heuristics.
+
 Each source receipt names the repo, UTC check time, verified-public flag,
 status (complete/partial/unavailable/excluded) and bounded gap descriptions.
 Only a successful repository metadata response with `private: false` permits

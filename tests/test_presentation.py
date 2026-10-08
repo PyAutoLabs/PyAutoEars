@@ -80,11 +80,40 @@ def test_plan_hints_require_explicit_issued_record_and_nonempty_plan(tmp_path):
 def test_old_snapshots_still_render_and_plan_hints_do_not_change_feed():
     snapshot = fixture()
     snapshot.pop('follow_through', None)
+    for row in snapshot['conversations']:
+        row.pop('created_at', None)
+        row.pop('updated_at', None)
     baseline = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP)
+    assert '<td class="conversation-date">Unavailable</td>' in baseline['index.html']
     with_plan = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP, plans={snapshot['conversations'][0]['url']})
     assert '>Plan recorded<' in with_plan['index.html']
     assert baseline['state.json'] == with_plan['state.json']
     assert baseline['badge.json'] == with_plan['badge.json']
+
+
+def test_conversation_dates_in_both_tables_do_not_change_feed_or_waiting_age():
+    snapshot = fixture()
+    from copy import deepcopy
+    activity = deepcopy(snapshot['conversations'][0])
+    activity.update(id='example/lib/issues/2', number=2,
+                    url='https://github.com/example/lib/issues/2',
+                    awaiting_response=False, waiting_since=None)
+    snapshot['conversations'].append(activity)
+    baseline = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP)
+    snapshot['conversations'][0]['updated_at'] = STAMP
+    result = board.render(snapshot, CONFIG, BRAIN, rendered_at=STAMP)
+    page = result['index.html']
+    assert page.count('<th scope="col">Updated</th>') == 2
+    assert '<time datetime="2026-10-03T12:00:00Z">03 Oct 2026</time></td>' in page
+    assert '01 Oct 2026</time> (created)' in page
+    assert '03 Oct 2026' in result['dashboard.md']
+    assert '01 Oct 2026 (created)' in result['dashboard.md']
+    assert '2d waiting' in page
+    assert result['state.json'] == baseline['state.json']
+    assert 'topic-meta' not in page
+    assert 'Open issue ↗' not in page
+    assert 'Recurring feedback' not in page
+    assert page.count('aria-label="Open conversation on GitHub"') == 2
 
 
 def test_waiting_age_uses_observation_not_render_time():

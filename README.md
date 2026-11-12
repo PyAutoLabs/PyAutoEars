@@ -27,3 +27,5 @@ published releases, and flags contributor updates owed. See the contract for
 remains a later phase. `/feedback` ships in Brain and all four domain assistants.
 
 [Contract and operation](REFERENCE.md) · [Agent guidance](AGENTS.md)
+
+<sub><i><a href="https://skrillex.lnk.to/Rumble">yo, listen, you hear that?</a></i></sub>

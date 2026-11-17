@@ -97,6 +97,21 @@ def test_public_only_and_failed_metadata_never_leak_titles():
     assert {r["status"] for r in s["receipts"]} == {"complete", "excluded", "unavailable"}
 
 
+def test_invisible_source_is_excluded_but_other_failures_stay_unavailable():
+    api = API({"repos/hidden/lib": collect.NotFound("source not found or not visible publicly"),
+               "repos/limited/lib": collect.ReadError("GitHub read failed (permissions, rate limit or endpoint)"),
+               listing("hidden/lib"): [thread(title="HIDDEN TITLE")]})
+    s = collect.collect(api, ["hidden/lib", "limited/lib"], CONFIG)
+    receipts = {r["repo"]: r for r in s["receipts"]}
+    hidden, limited = receipts["hidden/lib"], receipts["limited/lib"]
+    assert hidden["status"] == "excluded" and hidden["public_verified"] is False
+    assert hidden["gaps"] == ["source is not visible publicly (private or missing)"]
+    assert limited["status"] == "unavailable" and limited["public_verified"] is False
+    assert not any(c.startswith(("repos/hidden/lib/", "repos/limited/lib/")) for c in api.calls)
+    assert "HIDDEN TITLE" not in json.dumps(s)
+    collect.validate(s)
+
+
 def test_pagination_and_oldest_conversation_beyond_thirty():
     api = API({listing(): [thread(n) for n in range(1, 101)],
                listing(page=2): [thread(101, created_at="2020-01-01T00:00:00Z")]})
@@ -234,6 +249,23 @@ def test_gh_adapter_only_uses_get(monkeypatch):
     assert calls == [["gh", "api", "--method", "GET", "repos/example/lib/issues"]]
     with pytest.raises(collect.ReadError):
         collect.GitHub().get("https://example.invalid/upload")
+
+
+@pytest.mark.parametrize("stderr, error", [
+    ("gh: Not Found (HTTP 404)\n", collect.NotFound),
+    ("gh: API rate limit exceeded (HTTP 403)\n", collect.ReadError),
+    ("gh: Server Error (HTTP 502)\n", collect.ReadError),
+    (None, collect.ReadError),
+])
+def test_gh_adapter_classifies_not_found(monkeypatch, stderr, error):
+    payload = '{"message": "SECRET PAYLOAD"}'
+    def run(args, **kw):
+        return type("Result", (), {"returncode": 1, "stdout": payload, "stderr": stderr})()
+    monkeypatch.setattr(collect.subprocess, "run", run)
+    with pytest.raises(collect.ReadError) as caught:
+        collect.GitHub().get("repos/example/lib")
+    assert type(caught.value) is error
+    assert "SECRET" not in str(caught.value)
 
 
 def test_bot_pr_requested_review_is_not_lost():

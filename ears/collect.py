@@ -86,6 +86,10 @@ class ReadError(Exception):
     """Bounded public description, never an API payload or secret."""
 
 
+class NotFound(ReadError):
+    """The source answered 404: private to this token, renamed or missing."""
+
+
 class GitHub:
     def __init__(self, binary="gh"):
         self.binary = binary
@@ -99,6 +103,10 @@ class GitHub:
         except (OSError, subprocess.TimeoutExpired):
             raise ReadError("GitHub client unavailable or timed out") from None
         if r.returncode:
+            # gh reports "HTTP 404" on stderr; GitHub answers 404, not 403, for
+            # a private repository the token cannot see.
+            if "HTTP 404" in (r.stderr or ""):
+                raise NotFound("source not found or not visible publicly")
             raise ReadError("GitHub read failed (permissions, rate limit or endpoint)")
         try:
             return json.loads(r.stdout)
@@ -504,6 +512,12 @@ def collect(api, repo_homes, config, pending=None):
                 receipt["status"] = "excluded"
                 receipt["gaps"] = ["source is not verified public"]
                 continue
+        except NotFound:
+            # Private to the collector's token (or missing): not public, so
+            # excluded rather than a collection failure.
+            receipt["status"] = "excluded"
+            receipt["gaps"] = ["source is not visible publicly (private or missing)"]
+            continue
         except ReadError as exc:
             receipt["gaps"] = [str(exc)]
             continue

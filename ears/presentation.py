@@ -126,6 +126,8 @@ def waiting_label(row, observed):
         return 'Closed'
     if row['answered']:
         return 'Answered'
+    if row.get('close_due') is True:
+        return 'Close due'
     return 'Watching'
 
 

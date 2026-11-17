@@ -256,3 +256,22 @@ the acting account's permission or refer it to a maintainer; never infer the
 commenter's permissions from the collector token. Reopening, unlocking and
 clearing an answer are separate, explicitly authorized actions. Ears performs
 none of them. Stale/cached evidence must be refreshed before acting.
+
+## Waiting on the contributor (optional snapshot v1 extension)
+
+An open issue or unsettled Discussion (not answered) carries two optional fields
+when the policy in Mind's `policy/community_close_due.md` can apply: the thread
+is not a PR, not in a broadcast category, not locked, and was opened by an
+external human. `awaiting_contributor_since` is the timestamp of our latest
+comment when it is the latest human message on the thread (nested replies
+included); otherwise it is null. Bot comments never reset the clock. `close_due`
+is true when collection time minus that timestamp is 21 days or more (the exact
+boundary is due), false when it is less or when nobody is waiting on the
+contributor, and null when coverage is incomplete. Null is unknown, never
+"not due".
+
+Rows where the policy cannot apply omit both fields, and readers accept
+snapshots without them. Ears only observes: it never posts the close message
+or closes a thread. Brain's Community conductor lists due threads with the
+standard message, and the human approves each batch before anything is posted.
+The board shows a quiet "Close due" response label.

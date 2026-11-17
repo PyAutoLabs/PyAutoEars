@@ -10,6 +10,9 @@ from pathlib import Path
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 BROADCAST = {"Announcements", "Show and tell"}
 FOLLOW_UP_WINDOW = timedelta(days=30)
+# Mind policy/community_close_due.md: a thread waiting on its contributor this
+# long is due for the standard close message. The exact boundary is due.
+CLOSE_DUE_AFTER = timedelta(days=21)
 DISCUSSION_COMMENTS = """query($owner:String!, $name:String!, $number:Int!, $after:String) {
   repository(owner:$owner, name:$name) { discussion(number:$number) {
     comments(first:100, after:$after) {
@@ -290,6 +293,63 @@ def follow_up(raw, comments, kind, selves, complete, url):
         return unknown
 
 
+def awaiting_contributor(comments, selves):
+    """Time of our comment when it is the latest human (non-bot) message, else None.
+
+    The opening post counts as a message, so a fresh thread is never waiting on
+    its own author.
+
+    Bot comments never reset the clock. A tie between us and someone else at
+    the latest time is not a wait on the contributor.
+    """
+    events, _ = activity_events(comments)
+    if not events:
+        return None
+    timed = [(utc(t), who.casefold()) for t, who in events]
+    latest = max(t for t, _ in timed)
+    actors = {who for t, who in timed if t == latest}
+    return latest.isoformat() if actors <= selves else None
+
+
+def close_due_fields(raw, comments, kind, category, settled, selves, complete, observed_at):
+    """Optional close-due observation; omitted where the policy never applies."""
+    author = raw.get("user")
+    if kind == "pr" or settled or category in BROADCAST or raw.get("locked") \
+            or not human(author) or author["login"].casefold() in selves:
+        return {}
+    if not complete:
+        return {"awaiting_contributor_since": None, "close_due": None}
+    try:
+        since = awaiting_contributor([raw] + comments, selves)
+        due = since is not None and utc(observed_at or now()) - utc(since) >= CLOSE_DUE_AFTER
+    except (ValueError, TypeError):
+        return {"awaiting_contributor_since": None, "close_due": None}
+    return {"awaiting_contributor_since": since, "close_due": due}
+
+
+def validate_close_due(row, generated):
+    if "close_due" not in row and "awaiting_contributor_since" not in row:
+        return
+    if "close_due" not in row or "awaiting_contributor_since" not in row:
+        raise ValueError("incomplete close-due observation")
+    due, since = row["close_due"], row["awaiting_contributor_since"]
+    if row["kind"] not in {"issue", "discussion"} or row.get("closed") or row["answered"] \
+            or row["category"] in BROADCAST or "follow_up" in row:
+        raise ValueError("close-due observation on a settled or ineligible thread")
+    if due is None:
+        if since is not None:
+            raise ValueError("unknown close-due carries a timestamp")
+        return
+    if type(due) is not bool:
+        raise ValueError("invalid close-due evidence")
+    if since is None:
+        if due:
+            raise ValueError("close-due lacks a timestamp")
+        return
+    if row["coverage"] != "complete" or row["awaiting_response"] is not False or due != (utc(generated) - utc(since) >= CLOSE_DUE_AFTER):
+        raise ValueError("inconsistent close-due evidence")
+
+
 def validate_follow_up(row):
     if "follow_up" not in row:
         return
@@ -389,6 +449,8 @@ def conversation(api, repo, raw, kind, config, deliveries=None, pending=None, ob
             gaps.append("post-settlement activity or settlement time unknown")
     elif kind == "discussion" and (category in BROADCAST or raw.get("locked")):
         awaiting, since = False, None
+    close = close_due_fields(raw, comments, kind, category, settled, selves,
+                             complete and awaiting is not None, observed_at)
     if kind == "discussion" and deliveries is not None:
         from .followthrough import derive
         deliveries.append(derive(api, f"https://github.com/{repo}/discussions/{number}",
@@ -410,6 +472,7 @@ def conversation(api, repo, raw, kind, config, deliveries=None, pending=None, ob
         "feedback_report": "<!-- feedback-report: v1 -->" in (raw.get("body") or ""),
         **({"follow_up": observation} if observation is not None else {}),
         **({"historical_follow_up_at": historical_follow_up_at} if historical_follow_up_at else {}),
+        **close,
     }
 
 
@@ -531,7 +594,8 @@ def validate(snapshot):
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("invalid conversation")
-        if set(row) - {"closed", "follow_up", "created_at", "updated_at", "historical_follow_up_at"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
+        if set(row) - {"closed", "follow_up", "created_at", "updated_at", "historical_follow_up_at",
+                                "awaiting_contributor_since", "close_due"} != {"id", "repo", "number", "kind", "url", "title", "author", "category", "answered",
                         "awaiting_response", "waiting_since", "review_requested", "coverage", "gaps", "cached", "feedback_report"}:
             raise ValueError("unknown conversation fields; raw content must not be published")
         if "closed" in row and type(row["closed"]) is not bool:
@@ -549,6 +613,7 @@ def validate(snapshot):
             raise ValueError("invalid or duplicate conversation identity/link")
         ids.add(identity)
         validate_follow_up(row)
+        validate_close_due(row, snapshot["generated"])
         if "historical_follow_up_at" in row:
             historical = utc(row["historical_follow_up_at"])
             if row.get("follow_up") != {"review_needed": False, "since": None, "url": None} \

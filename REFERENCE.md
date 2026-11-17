@@ -38,6 +38,8 @@ Each source receipt names the repo, UTC check time, verified-public flag,
 status (complete/partial/unavailable/excluded) and bounded gap descriptions.
 Only a successful repository metadata response with `private: false` permits
 collection. Failed metadata reads and private repositories publish no rows.
+A metadata read that answers 404 (a source the collector cannot see: private
+to its token, or missing) is `excluded`, not `unavailable`.
 URLs are constructed from validated identities, never accepted from source
 text. Snapshot inputs are trusted local evidence envelopes, not proof of API
 authenticity; validate their source before using them for public publication.
